@@ -1,0 +1,27 @@
+[project]
+name = "screenredact"
+version = "0.1.0"
+description = "Agent that redacts screen recordings (emails, phone numbers, addresses, credit cards)"
+authors = [
+    {name = "Teofilo Sibileau",email = "teo.sibileau@gmail.com"}
+]
+readme = "README.md"
+requires-python = "~3.13"
+dependencies = [
+    "paddlepaddle (>=3.3.1,<4.0.0)",
+    "paddleocr (>=3.4.1,<4.0.0)",
+    "typer (>=0.24.1,<0.25.0)",
+    "presidio-analyzer (>=2.2.362,<3.0.0)"
+]
+
+
+[tool.poetry]
+packages = [{ include = "screenredact" }]
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.5.1"
+pytest = "^9.0.3"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
