@@ -1,0 +1,10 @@
+{
+  // Line length — prose shouldn't be hard-wrapped.
+  "MD013": false,
+
+  // Inline HTML — allow; we occasionally need <details>, <br>, etc.
+  "MD033": false,
+
+  // Duplicate headings — allow when nested under different parents.
+  "MD024": { "siblings_only": true }
+}
