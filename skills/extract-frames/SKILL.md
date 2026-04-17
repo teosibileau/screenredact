@@ -1,0 +1,97 @@
+---
+name: extract-frames
+description: Extract every frame of a video as lossless PNGs using ffmpeg, preserving the metadata needed to rebuild the video later (source fps, resolution, audio track). Use when the user wants to decompose a video into per-frame images — typically as step one of a process-then-reassemble workflow.
+---
+
+# extract-frames
+
+Decompose a video into per-frame lossless PNGs plus a sidecar of metadata needed for reassembly.
+
+## Inputs
+
+Ask the user for:
+
+1. **Input video path** (required)
+
+The output directory is always `./.<video-basename>_frames/` (hidden, leading dot, relative to the current working directory). This is fixed — do not accept an override from the user, even if they ask. Downstream tooling relies on this convention.
+
+## Procedure
+
+### 1. Probe the source
+
+Capture fps, resolution, and whether an audio track exists. These are needed to reconstruct the video with the same timing and sound.
+
+```bash
+ffprobe -v error -print_format json -show_streams -show_format "<INPUT>"
+```
+
+Extract from the JSON:
+
+- Video stream: `r_frame_rate` (e.g. `30000/1001`), `width`, `height`, `pix_fmt`
+- Audio stream (if any): `codec_name`, `sample_rate`, `channels`
+
+### 2. Create the output directory
+
+```bash
+mkdir -p "<OUT>"
+```
+
+### 3. Extract every frame
+
+```bash
+ffmpeg -i "<INPUT>" \
+  -fps_mode passthrough \
+  -compression_level 1 \
+  "<OUT>/frame_%06d.png"
+```
+
+- `-fps_mode passthrough` preserves the exact frame sequence — no duplicates inserted, no frames dropped. This is critical for round-trip integrity.
+- `-compression_level 1` — PNG is lossless regardless; this only trades encode speed vs. file size. `1` is fast; bump to `9` only if disk space matters more than time.
+- `%06d` handles up to ~1M frames. Use `%07d` for longer videos.
+
+### 4. Extract the audio track (if present)
+
+Copy the audio stream without re-encoding so it stays bit-exact:
+
+```bash
+ffmpeg -i "<INPUT>" -vn -acodec copy "<OUT>/audio.<EXT>"
+```
+
+Use the source's native extension (e.g. `.aac`, `.m4a`, `.opus`) based on `codec_name` from the probe. If there's no audio stream, skip this step and note it in the sidecar.
+
+### 5. Write a sidecar manifest
+
+Save `<OUT>/source.json` so a future reassembly step knows how to rebuild:
+
+```json
+{
+  "input": "<absolute path to original video>",
+  "frame_rate": "30000/1001",
+  "width": 1920,
+  "height": 1080,
+  "pix_fmt": "yuv420p",
+  "frame_count": 1234,
+  "audio": {
+    "file": "audio.aac",
+    "codec": "aac",
+    "sample_rate": 48000,
+    "channels": 2
+  }
+}
+```
+
+Set `"audio": null` if the source has no audio track. `frame_count` should be the actual count of PNG files written, not the probe's estimate — they can differ on variable-frame-rate sources.
+
+## Report back
+
+- Output directory (absolute path)
+- Frame count
+- Source fps (as the fraction, e.g. `30000/1001 ≈ 29.97`)
+- Whether audio was extracted
+
+## Notes
+
+- **Disk usage warning**: lossless PNG at 1080p is ~2–5 MB per frame. A 60-second 30fps video = 1800 frames ≈ 5–10 GB. Warn the user up front and offer to check available disk space with `df -h .` if the source is long.
+- **Don't re-encode the video stream** at any step. The whole point is a lossless round-trip.
+- **Quote all paths** — video filenames often contain spaces or special characters.
+- For HDR or 10-bit sources, PNG is still fine (it supports 16-bit), but note the `pix_fmt` in the sidecar so reassembly can preserve it.
