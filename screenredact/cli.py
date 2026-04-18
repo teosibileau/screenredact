@@ -13,6 +13,7 @@ import typer
 from rich.progress import Progress
 
 from screenredact.detector import FrameAnalyzer
+from screenredact.report import FrameAnalyzerReport
 
 app = typer.Typer(
     add_completion=False,
@@ -65,6 +66,28 @@ def detect(
             progress.update(task, advance=1)
 
     typer.echo(f"Analyzed {len(frames)} frame(s). Wrote {written} detection file(s) to {out}/")
+
+
+@app.command()
+def report(
+    frames_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Directory containing detection sidecar JSONs (e.g. .<video>_frames/).",
+    ),
+) -> None:
+    """Aggregate detection sidecars into a report.json roll-up."""
+    r = FrameAnalyzerReport(frames_dir)
+    r.scan()
+    out = r.write()
+    typer.echo(f"Wrote {out}")
+    typer.echo(f"{r.frames_with_detections}/{r.total_frames} frames had detections.")
+    if r.detection_counts:
+        for t, n in r.detection_counts.most_common():
+            typer.echo(f"{n:4d}  {t}")
 
 
 if __name__ == "__main__":

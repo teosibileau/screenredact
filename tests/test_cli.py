@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import call, patch
 
@@ -239,3 +240,114 @@ def test_cli_processes_frames_in_sorted_order(tmp_path):
         "frame_000005.png",
         "frame_000009.png",
     ]
+
+
+# ---------------------------------------------------------------------------
+# `report` subcommand
+# ---------------------------------------------------------------------------
+
+
+def _write_sidecar(dir_: Path, stem: str, types: list[str]) -> None:
+    (dir_ / f"{stem}.json").write_text(
+        json.dumps(
+            {
+                "frame": f"{stem}.png",
+                "detections": [
+                    {
+                        "type": t,
+                        "text": "x",
+                        "line_text": "x",
+                        "bbox": [[0, 0]],
+                        "ocr_confidence": 0.9,
+                        "pii_score": 1.0,
+                    }
+                    for t in types
+                ],
+            }
+        )
+    )
+
+
+def test_report_errors_on_missing_directory(tmp_path):
+    result = runner.invoke(app, ["report", str(tmp_path / "nope")])
+    assert result.exit_code != 0
+
+
+def test_report_errors_on_file_instead_of_directory(tmp_path):
+    f = tmp_path / "not_a_dir"
+    f.write_bytes(b"x")
+    result = runner.invoke(app, ["report", str(f)])
+    assert result.exit_code != 0
+
+
+def test_report_writes_report_json_in_frames_dir(tmp_path):
+    _make_frames(tmp_path, 2)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+
+    result = runner.invoke(app, ["report", str(tmp_path)])
+
+    assert result.exit_code == 0
+    report_path = tmp_path / "report.json"
+    assert report_path.exists()
+    data = json.loads(report_path.read_text())
+    assert data["total_frames"] == 2
+    assert data["frames_with_detections"] == 1
+    assert data["detection_counts"] == {"EMAIL_ADDRESS": 1}
+
+
+def test_report_stdout_summary(tmp_path):
+    _make_frames(tmp_path, 3)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    _write_sidecar(tmp_path, "frame_000001", ["EMAIL_ADDRESS", "PHONE_NUMBER"])
+
+    result = runner.invoke(app, ["report", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "2/3 frames had detections" in result.stdout
+    assert "EMAIL_ADDRESS" in result.stdout
+    assert "PHONE_NUMBER" in result.stdout
+
+
+def test_report_on_empty_dir_writes_zeros_and_does_not_list_counts(tmp_path):
+    result = runner.invoke(app, ["report", str(tmp_path)])
+    assert result.exit_code == 0
+    data = json.loads((tmp_path / "report.json").read_text())
+    assert data == {
+        "total_frames": 0,
+        "frames_with_detections": 0,
+        "detection_counts": {},
+    }
+    # No type lines printed when there's nothing to report:
+    assert "EMAIL_ADDRESS" not in result.stdout
+    assert "0/0 frames had detections" in result.stdout
+
+
+def test_report_prints_counts_most_common_first(tmp_path):
+    # LOCATION has 1, EMAIL has 3, PHONE has 2:
+    _write_sidecar(tmp_path, "a", ["LOCATION"])
+    _write_sidecar(tmp_path, "b", ["EMAIL_ADDRESS", "EMAIL_ADDRESS", "PHONE_NUMBER"])
+    _write_sidecar(tmp_path, "c", ["EMAIL_ADDRESS", "PHONE_NUMBER"])
+
+    result = runner.invoke(app, ["report", str(tmp_path)])
+
+    assert result.exit_code == 0
+    email_idx = result.stdout.index("EMAIL_ADDRESS")
+    phone_idx = result.stdout.index("PHONE_NUMBER")
+    location_idx = result.stdout.index("LOCATION")
+    assert email_idx < phone_idx < location_idx
+
+
+def test_report_ignores_non_detection_jsons(tmp_path):
+    _make_frames(tmp_path, 2)
+    # source.json from extract-frames skill shape — no "detections" key:
+    (tmp_path / "source.json").write_text(
+        json.dumps({"input": "x.mov", "frame_rate": "30/1", "frame_count": 2})
+    )
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+
+    result = runner.invoke(app, ["report", str(tmp_path)])
+
+    assert result.exit_code == 0
+    data = json.loads((tmp_path / "report.json").read_text())
+    assert data["frames_with_detections"] == 1
+    assert data["detection_counts"] == {"EMAIL_ADDRESS": 1}

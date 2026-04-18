@@ -76,22 +76,43 @@ One JSON file per frame-with-detections, named `<frame_stem>.json` next to the P
 
 ## Report back
 
-- Frames scanned (the CLI prints `Analyzed N frame(s). Wrote M detection file(s) to <dir>/`)
-- A breakdown of detection types across all sidecars. Use:
+### 1. Generate the roll-up
 
-  ```bash
-  poetry run python -c "
-  import json, pathlib, collections, sys
-  d = pathlib.Path(sys.argv[1])
-  c = collections.Counter()
-  for p in sorted(d.glob('*.json')):
-      for det in json.loads(p.read_text())['detections']:
-          c[det['type']] += 1
-  for t, n in c.most_common(): print(f'{n:4d}  {t}')
-  " "<FRAMES_DIR>"
-  ```
+Run the project's own `report` subcommand — it scans every sidecar in the frames directory and writes `report.json` alongside them, while echoing the summary to stdout.
 
-- If the `LOCATION` count looks suspiciously high, mention it — NER-based address detection is the noisiest of the four recognizers and often fires on UI labels or proper nouns. Review a few sidecars before trusting them for redaction.
+```bash
+poetry run screenredact report "<FRAMES_DIR>"
+```
+
+That produces `<FRAMES_DIR>/report.json`:
+
+```json
+{
+  "total_frames": 3461,
+  "frames_with_detections": 412,
+  "detection_counts": {
+    "EMAIL_ADDRESS": 412,
+    "LOCATION": 87,
+    "PHONE_NUMBER": 6,
+    "CREDIT_CARD": 2
+  }
+}
+```
+
+and stdout like:
+
+```text
+Wrote <FRAMES_DIR>/report.json
+412/3461 frames had detections.
+ 412  EMAIL_ADDRESS
+  87  LOCATION
+   6  PHONE_NUMBER
+   2  CREDIT_CARD
+```
+
+### 2. Relay to the user
+
+Surface the coverage ratio (`frames_with_detections / total_frames`) and the top couple of detection types. If the `LOCATION` count looks suspiciously high, mention it — NER-based address detection is the noisiest of the four recognizers and often fires on UI labels or proper nouns. Review a few sidecars before trusting them for redaction.
 
 ## Notes
 
