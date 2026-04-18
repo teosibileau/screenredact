@@ -9,7 +9,7 @@ Consume the detection sidecars written by `detect-frames` and blur the PII bbox 
 
 ## Prerequisites
 
-The project's Python environment must be set up per `SETUP.md`. `poetry install` (the default, which includes the `runtime` group) pulls in `cv2` transitively via `opencv-contrib-python` — there is no extra step.
+The project's Python environment must be set up per `SETUP.md`. `poetry install` (the default, which includes the `runtime` group) installs `opencv-contrib-python` directly, which provides `cv2`. No extra step needed.
 
 If `detect-frames` has not been run against this directory yet, stop and do that first. Without sidecar JSONs there is nothing for this skill to blur.
 
@@ -74,4 +74,4 @@ If the user wants to rewind, deleting every `<FRAMES_DIR>/*_blurred.png` restore
 - **Over-coverage is deliberate.** The AABB of the OCR polygon plus 4px padding errs toward blurring a slightly larger region than strictly required. This is the safe bias for a redaction tool.
 - **Ctrl-C is safe mid-run.** Each frame is written atomically via `cv2.imwrite`. Already-written `_blurred.png` files are preserved. Re-running picks up where it left off and overwrites any blurred outputs in place — originals are never read as candidates (the `_blurred.png` suffix is excluded from the input glob).
 - **Outputs are gitignored.** The existing `.*_frames/` pattern in `.gitignore` catches `_blurred.png` files automatically — they live in the same hidden frames directory as everything else.
-- **No new dependencies required.** `cv2` is already in the `runtime` Poetry group via `paddleocr` → `opencv-contrib-python`. If `poetry install` has been run, you're ready.
+- **No new dependencies required.** `opencv-contrib-python` (which provides `cv2`) is a direct entry in the `runtime` Poetry group. If `poetry install` has been run, you're ready.

@@ -45,11 +45,14 @@ def detect(
         "-o",
         help="Where to write JSON sidecars. Defaults to frames_dir.",
     ),
-    lang: str = typer.Option("en", "--lang", "-l", help="OCR language code."),
+    lang: str = typer.Option(
+        "en-US", "--lang", "-l", help="OCR language (BCP-47, e.g. en-US, de-DE)."
+    ),
 ) -> None:
-    # Lazy import: pulling in FrameAnalyzer transitively imports paddleocr +
-    # presidio. Keeping it inside the command body means lightweight commands
-    # like `screenredact report` work with just `poetry install --without runtime`.
+    # Lazy import: pulling in FrameAnalyzer transitively imports ocrmac (Apple
+    # Vision bridge) + Pillow + presidio. Keeping it inside the command body
+    # means lightweight commands like `screenredact report` work with just
+    # `poetry install --without runtime`.
     from screenredact.detector import FrameAnalyzer
 
     out = output_dir or frames_dir

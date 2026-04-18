@@ -1,11 +1,11 @@
 ---
 name: detect-frames
-description: Run the screenredact detection pipeline over a directory of extracted video frames, producing one JSON sidecar per frame that contains PII (emails, phone numbers, credit cards, addresses). Use after the extract-frames skill has decomposed a video into PNGs, and before any redaction step — this is the "find what to blur" phase.
+description: Run the screenredact detection pipeline over a directory of extracted video frames, producing one JSON sidecar per frame that contains PII (emails, phone numbers, credit cards, addresses). Use after the extract-frames skill has decomposed a video into PNGs, and before any redaction step — this is the "find what to blur" phase. macOS-only: OCR runs through Apple's Vision framework.
 ---
 
 # detect-frames
 
-Scan a directory of video frames with OCR + PII detection (PaddleOCR → Presidio) and write per-frame JSON sidecars for every frame that contains sensitive data.
+Scan a directory of video frames with OCR + PII detection (Apple Vision → Presidio) and write per-frame JSON sidecars for every frame that contains sensitive data.
 
 ## Prerequisites
 
@@ -44,9 +44,9 @@ poetry run screenredact detect "<FRAMES_DIR>"
 
 This is the project's own CLI (registered as `screenredact = "screenredact.cli:app"` in `pyproject.toml`). It:
 
-- Loads PaddleOCR + Presidio once per process (class-level cache in `screenredact.detector.FrameAnalyzer`)
+- Loads Presidio once per process (class-level cache in `screenredact.detector.FrameAnalyzer`); Apple Vision is a framework service with no model-load step
 - Iterates frames in sorted order
-- For each frame: OCRs it, runs Presidio over each recognized line, collects any hits as `Detection` records
+- For each frame: OCRs it through Apple Vision (`ocrmac.OCR(...).recognize()`), runs Presidio over each recognized line, collects any hits as `Detection` records
 - Writes a sidecar JSON **only when the frame has ≥1 detection** — clean frames produce no file
 
 Entity types detected: `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD` (Luhn-validated by Presidio), `LOCATION` (address proxy via spaCy NER).
@@ -116,8 +116,8 @@ Surface the coverage ratio (`frames_with_detections / total_frames`) and the top
 
 ## Notes
 
-- **Runtime is serial and CPU-bound.** Expect 0.5–2 s/frame on Apple Silicon CPU. A 3000-frame video is 25–100 min. Warn the user up front if the frames dir is large and offer to run on a subset first (e.g. `cp <FRAMES_DIR>/frame_0005{00..09}.png /tmp/frame_sample/` → `poetry run screenredact detect /tmp/frame_sample/`).
-- **First invocation per machine is slow.** PaddleOCR downloads ~30 MB of detection + recognition + angle-classification weights to `~/.paddleocr/` on the first frame it sees. Subsequent invocations are fast. If the first run appears to hang, it's almost certainly this download — don't kill it.
+- **Runtime is serial but GPU/Neural-Engine-accelerated.** Expect ~100–250 ms/frame in Vision's `accurate` mode on Apple Silicon. A 3000-frame video is ~5–15 min. For large inputs you can still run on a subset first (e.g. `cp <FRAMES_DIR>/frame_0005{00..09}.png /tmp/frame_sample/` → `poetry run screenredact detect /tmp/frame_sample/`).
+- **First-frame startup is Presidio, not OCR.** Apple Vision loads instantly via the framework bridge; the ~5 s first-frame pause is Presidio + spaCy's `en_core_web_lg` model loading into memory. Subsequent frames reuse the cached analyzer.
 - **Presidio warnings at startup are noise.** It logs `Recognizer not added to registry` for Spanish/Italian/Polish recognizers when the language is `en`. Harmless. Do not treat it as an error.
 - **Ctrl-C is safe mid-run.** Already-written sidecars are preserved. Detection is idempotent per frame — re-running will re-OCR unchanged frames but overwrite sidecars with identical content.
 - **Sidecars are gitignored.** The `.*_frames/` pattern in `.gitignore` catches the whole hidden frames directory, including the JSON files inside.
