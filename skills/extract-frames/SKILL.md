@@ -27,8 +27,10 @@ ffprobe -v error -print_format json -show_streams -show_format "<INPUT>"
 
 Extract from the JSON:
 
-- Video stream: `r_frame_rate` (e.g. `30000/1001`), `width`, `height`, `pix_fmt`
+- Video stream: `avg_frame_rate` (e.g. `30000/1001`), `width`, `height`, `pix_fmt`
 - Audio stream (if any): `codec_name`, `sample_rate`, `channels`
+
+Use `avg_frame_rate`, **not** `r_frame_rate`. For CFR broadcast-style sources they match, but screen recordings are typically VFR: `r_frame_rate` reports the stream's timebase max (often 100 or 1000 fps) while `avg_frame_rate` is the actual average. Reassembling at `r_frame_rate` produces a visibly fast, out-of-sync output.
 
 ### 2. Create the output directory
 
@@ -80,7 +82,7 @@ Save `<OUT>/source.json` so a future reassembly step knows how to rebuild:
 }
 ```
 
-Set `"audio": null` if the source has no audio track. `frame_count` should be the actual count of PNG files written, not the probe's estimate — they can differ on variable-frame-rate sources.
+Set `"audio": null` if the source has no audio track. `frame_count` should be the actual count of PNG files written, not the probe's estimate — they can differ on variable-frame-rate sources. `frame_rate` must hold `avg_frame_rate` from the probe (see step 1) — downstream reassembly reads this field verbatim and uses it as the output rate.
 
 ## Report back
 
