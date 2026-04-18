@@ -26,6 +26,20 @@ Verify:
 ffmpeg -version   # expect ffmpeg version 8.x
 ```
 
+### jq — JSON reader
+
+Used by the `reassemble-video` skill to read framerate, pixel format, and audio metadata from the `source.json` sidecar written by `extract-frames`.
+
+```sh
+brew install jq
+```
+
+Verify:
+
+```sh
+jq --version   # expect jq-1.7 or newer
+```
+
 ### pyenv — Python version manager
 
 ```sh
