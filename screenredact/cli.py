@@ -12,7 +12,6 @@ from pathlib import Path
 import typer
 from rich.progress import Progress
 
-from screenredact.detector import FrameAnalyzer
 from screenredact.report import FrameAnalyzerReport
 
 app = typer.Typer(
@@ -47,6 +46,11 @@ def detect(
     ),
     lang: str = typer.Option("en", "--lang", "-l", help="OCR language code."),
 ) -> None:
+    # Lazy import: pulling in FrameAnalyzer transitively imports paddleocr +
+    # presidio. Keeping it inside the command body means lightweight commands
+    # like `screenredact report` work with just `poetry install --without runtime`.
+    from screenredact.detector import FrameAnalyzer
+
     out = output_dir or frames_dir
     out.mkdir(parents=True, exist_ok=True)
 
