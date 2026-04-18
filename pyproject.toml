@@ -14,6 +14,9 @@ dependencies = [
     "presidio-analyzer (>=2.2.362,<3.0.0)"
 ]
 
+[project.scripts]
+screenredact = "screenredact.cli:app"
+
 
 [tool.poetry]
 packages = [{ include = "screenredact" }]
@@ -21,6 +24,10 @@ packages = [{ include = "screenredact" }]
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.5.1"
 pytest = "^9.0.3"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
