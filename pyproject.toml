@@ -1,0 +1,68 @@
+[project]
+name = "screenredact"
+version = "0.1.0"
+description = "Agent that redacts screen recordings (emails, phone numbers, addresses, credit cards)"
+authors = [
+    {name = "Teofilo Sibileau",email = "teo.sibileau@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "paddlepaddle (>=3.3.1,<4.0.0)",
+    "paddleocr (>=3.4.1,<4.0.0)",
+    "typer (>=0.24.1,<0.25.0)",
+    "presidio-analyzer (>=2.2.362,<3.0.0)"
+]
+
+[project.scripts]
+screenredact = "screenredact.cli:app"
+
+
+[tool.poetry]
+packages = [{ include = "screenredact" }]
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.5.1"
+pytest = "^9.0.3"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = [".*_frames"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# Typer's API requires calling typer.Argument / typer.Option as defaults;
+# without this exception the CLI module gets a storm of B008 false positives.
+extend-immutable-calls = ["typer.Argument", "typer.Option"]
+
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["paddleocr.*", "presidio_analyzer.*"]
+ignore_missing_imports = true
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
