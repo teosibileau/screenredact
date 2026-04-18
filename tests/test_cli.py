@@ -131,14 +131,10 @@ def test_cli_output_dir_passed_to_write_detections(tmp_path):
 
     with patch("screenredact.cli.FrameAnalyzer") as FakeAnalyzer:
         FakeAnalyzer.return_value.write_detections.return_value = None
-        result = runner.invoke(
-            app, ["detect", str(frames), "--output-dir", str(out)]
-        )
+        result = runner.invoke(app, ["detect", str(frames), "--output-dir", str(out)])
 
     assert result.exit_code == 0
-    FakeAnalyzer.return_value.write_detections.assert_called_with(
-        frames / "frame_000000.png", out
-    )
+    FakeAnalyzer.return_value.write_detections.assert_called_with(frames / "frame_000000.png", out)
 
 
 def test_cli_defaults_output_dir_to_frames_dir(tmp_path):

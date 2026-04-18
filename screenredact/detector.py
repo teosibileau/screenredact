@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from paddleocr import PaddleOCR
 from presidio_analyzer import AnalyzerEngine
@@ -23,8 +24,8 @@ class Detection:
 class FrameAnalyzer:
     # Class-level caches: PaddleOCR + Presidio models load at most once per
     # process. Instances created inside tight loops reuse them for free.
-    _ocr_cache: dict[str, PaddleOCR] = {}
-    _analyzer: AnalyzerEngine | None = None
+    _ocr_cache: ClassVar[dict[str, PaddleOCR]] = {}
+    _analyzer: ClassVar[AnalyzerEngine | None] = None
 
     def __init__(self, lang: str = "en"):
         self.lang = lang
@@ -67,12 +68,10 @@ class FrameAnalyzer:
 
         for result in results:
             texts, scores, polys = self._extract_ocr_fields(result)
-            for text, score, poly in zip(texts, scores, polys):
+            for text, score, poly in zip(texts, scores, polys, strict=False):
                 if not text:
                     continue
-                pii_results = self.analyzer.analyze(
-                    text=text, entities=PII_ENTITIES, language="en"
-                )
+                pii_results = self.analyzer.analyze(text=text, entities=PII_ENTITIES, language="en")
                 bbox = [[float(p[0]), float(p[1])] for p in poly]
                 for pii in pii_results:
                     self.detections.append(

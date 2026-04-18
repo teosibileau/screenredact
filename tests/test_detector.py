@@ -188,7 +188,11 @@ def test_analyze_frame_none_ocr_returns_no_detections(analyzer):
 def test_analyze_frame_skips_empty_text_strings(analyzer):
     _set_ocr(
         analyzer,
-        [_FakeOcrResult(rec_texts=["", "", ""], rec_scores=[0.9, 0.9, 0.9], rec_polys=[[[0, 0]]] * 3)],
+        [
+            _FakeOcrResult(
+                rec_texts=["", "", ""], rec_scores=[0.9, 0.9, 0.9], rec_polys=[[[0, 0]]] * 3
+            )
+        ],
     )
     calls = []
     _set_pii(analyzer, lambda **kw: calls.append(kw) or [])
@@ -199,7 +203,11 @@ def test_analyze_frame_skips_empty_text_strings(analyzer):
 def test_analyze_frame_no_pii_returns_empty(analyzer):
     _set_ocr(
         analyzer,
-        [_FakeOcrResult(rec_texts=["boring text"], rec_scores=[0.99], rec_polys=[[[0, 0], [1, 1]]])],
+        [
+            _FakeOcrResult(
+                rec_texts=["boring text"], rec_scores=[0.99], rec_polys=[[[0, 0], [1, 1]]]
+            )
+        ],
     )
     _set_pii(analyzer, lambda **kw: [])
     assert analyzer.analyze_frame(Path("ignored.png")) == []
@@ -209,7 +217,13 @@ def test_analyze_frame_single_pii_maps_to_detection(analyzer):
     text = "Email me at foo@bar.com please"
     _set_ocr(
         analyzer,
-        [_FakeOcrResult(rec_texts=[text], rec_scores=[0.97], rec_polys=[[[10, 20], [110, 20], [110, 40], [10, 40]]])],
+        [
+            _FakeOcrResult(
+                rec_texts=[text],
+                rec_scores=[0.97],
+                rec_polys=[[[10, 20], [110, 20], [110, 40], [10, 40]]],
+            )
+        ],
     )
     _set_pii(
         analyzer,

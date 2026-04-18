@@ -8,7 +8,6 @@ into library modules (e.g. `screenredact.detector`).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.progress import Progress
@@ -39,7 +38,7 @@ def detect(
         readable=True,
         help="Directory containing PNG frames (e.g. .<video>_frames/).",
     ),
-    output_dir: Optional[Path] = typer.Option(
+    output_dir: Path | None = typer.Option(
         None,
         "--output-dir",
         "-o",
@@ -65,10 +64,7 @@ def detect(
                 written += 1
             progress.update(task, advance=1)
 
-    typer.echo(
-        f"Analyzed {len(frames)} frame(s). "
-        f"Wrote {written} detection file(s) to {out}/"
-    )
+    typer.echo(f"Analyzed {len(frames)} frame(s). Wrote {written} detection file(s) to {out}/")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 
-
 # --- Stub modules ------------------------------------------------------------
 # Without these stubs, importing `screenredact.detector` would trigger
 # `import paddleocr` / `import presidio_analyzer`, which pull in large
