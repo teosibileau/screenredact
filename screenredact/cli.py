@@ -7,6 +7,7 @@ into library modules (e.g. `screenredact.detector`).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import typer
@@ -92,6 +93,57 @@ def report(
     if r.detection_counts:
         for t, n in r.detection_counts.most_common():
             typer.echo(f"{n:4d}  {t}")
+
+
+@app.command()
+def blur(
+    frames_dir: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help="Directory containing PNG frames and their detection sidecars.",
+    ),
+    padding: int = typer.Option(
+        4,
+        "--padding",
+        "-p",
+        help="Pixels of padding around each bbox to catch anti-aliased edges.",
+    ),
+) -> None:
+    """Blur detected PII regions, writing `<stem>_blurred.png` siblings."""
+    # Lazy import: FrameBlurrer pulls in cv2 from the `runtime` Poetry group.
+    # Matching detect()'s pattern keeps lightweight commands (report) usable
+    # with `poetry install --without runtime`.
+    from screenredact.blurrer import FrameBlurrer
+
+    frames = sorted(p for p in frames_dir.glob("*.png") if not p.stem.endswith("_blurred"))
+    if not frames:
+        typer.echo(f"No PNG frames found in {frames_dir}", err=True)
+        raise typer.Exit(1)
+
+    blurrer = FrameBlurrer(padding=padding)
+    blurred = 0
+    with Progress() as progress:
+        task = progress.add_task("Blurring frames", total=len(frames))
+        for frame in frames:
+            sidecar = frames_dir / f"{frame.stem}.json"
+            progress.update(task, advance=1)
+            if not sidecar.exists():
+                continue
+            try:
+                payload = json.loads(sidecar.read_text())
+            except json.JSONDecodeError:
+                continue
+            detections = payload.get("detections") if isinstance(payload, dict) else None
+            if not detections:
+                continue
+            output_path = frames_dir / f"{frame.stem}_blurred.png"
+            blurrer.blur_and_write(frame, detections, output_path)
+            blurred += 1
+
+    typer.echo(f"Blurred {blurred}/{len(frames)} frame(s). Outputs at {frames_dir}/*_blurred.png")
 
 
 if __name__ == "__main__":

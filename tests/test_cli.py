@@ -351,3 +351,129 @@ def test_report_ignores_non_detection_jsons(tmp_path):
     data = json.loads((tmp_path / "report.json").read_text())
     assert data["frames_with_detections"] == 1
     assert data["detection_counts"] == {"EMAIL_ADDRESS": 1}
+
+
+# ---------------------------------------------------------------------------
+# `blur` subcommand
+# ---------------------------------------------------------------------------
+
+
+def test_blur_errors_on_missing_directory(tmp_path):
+    result = runner.invoke(app, ["blur", str(tmp_path / "nope")])
+    assert result.exit_code != 0
+
+
+def test_blur_errors_on_file_instead_of_directory(tmp_path):
+    f = tmp_path / "not_a_dir.png"
+    f.write_bytes(b"fake")
+    result = runner.invoke(app, ["blur", str(f)])
+    assert result.exit_code != 0
+
+
+def test_blur_errors_on_empty_directory(tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    result = runner.invoke(app, ["blur", str(empty)])
+    assert result.exit_code == 1
+    assert "No PNG frames found" in result.stderr
+
+
+def test_blur_skips_frames_without_sidecar(tmp_path):
+    _make_frames(tmp_path, 3)
+    # No sidecars at all — nothing to blur.
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+    assert result.exit_code == 0
+    FakeBlurrer.return_value.blur_and_write.assert_not_called()
+    assert "Blurred 0/3" in result.stdout
+
+
+def test_blur_skips_frames_with_empty_detections(tmp_path):
+    _make_frames(tmp_path, 2)
+    _write_sidecar(tmp_path, "frame_000000", [])  # no detections
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+    assert result.exit_code == 0
+    FakeBlurrer.return_value.blur_and_write.assert_not_called()
+
+
+def test_blur_writes_blurred_png_for_frames_with_detections(tmp_path):
+    _make_frames(tmp_path, 2)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+    assert result.exit_code == 0
+    # Exactly one sidecar has detections, so exactly one blur call:
+    assert FakeBlurrer.return_value.blur_and_write.call_count == 1
+    args, _ = FakeBlurrer.return_value.blur_and_write.call_args
+    assert args[0] == tmp_path / "frame_000000.png"
+    assert args[2] == tmp_path / "frame_000000_blurred.png"
+
+
+def test_blur_excludes_existing_blurred_outputs_from_input(tmp_path):
+    _make_frames(tmp_path, 1)
+    # Pre-existing blurred output from a prior run — must not be re-processed:
+    (tmp_path / "frame_000000_blurred.png").write_bytes(b"already-blurred")
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+
+    assert result.exit_code == 0
+    # One real frame with detections -> one call; the pre-existing blurred
+    # output should have been filtered out of the input glob entirely.
+    assert FakeBlurrer.return_value.blur_and_write.call_count == 1
+    assert "Blurred 1/1" in result.stdout
+
+
+def test_blur_stdout_reports_blurred_over_total(tmp_path):
+    _make_frames(tmp_path, 4)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    _write_sidecar(tmp_path, "frame_000002", ["PHONE_NUMBER"])
+    with patch("screenredact.blurrer.FrameBlurrer"):
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Blurred 2/4" in result.stdout
+
+
+def test_blur_passes_padding_option_to_blurrer(tmp_path):
+    _make_frames(tmp_path, 1)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        runner.invoke(app, ["blur", str(tmp_path), "--padding", "12"])
+    FakeBlurrer.assert_called_once_with(padding=12)
+
+
+def test_blur_default_padding_is_4(tmp_path):
+    _make_frames(tmp_path, 1)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        runner.invoke(app, ["blur", str(tmp_path)])
+    FakeBlurrer.assert_called_once_with(padding=4)
+
+
+def test_blur_tolerates_malformed_sidecar_json(tmp_path):
+    _make_frames(tmp_path, 2)
+    (tmp_path / "frame_000000.json").write_text("{not valid json")
+    _write_sidecar(tmp_path, "frame_000001", ["EMAIL_ADDRESS"])
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+    assert result.exit_code == 0
+    # Malformed sidecar is skipped silently; only the valid one blurs.
+    assert FakeBlurrer.return_value.blur_and_write.call_count == 1
+
+
+def test_blur_overwrites_existing_blurred_output(tmp_path):
+    _make_frames(tmp_path, 1)
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    pre = tmp_path / "frame_000000_blurred.png"
+    pre.write_bytes(b"stale-output")
+
+    # Use the real FrameBlurrer + conftest's cv2 stub (which writes bytes
+    # via imwrite) to verify the on-disk file actually gets rewritten.
+    result = runner.invoke(app, ["blur", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert pre.read_bytes() != b"stale-output"
+    # Original frame is never touched:
+    assert (tmp_path / "frame_000000.png").read_bytes() == b"fake"
