@@ -86,9 +86,12 @@ class FrameAnalyzer:
                 )
         return self.detections
 
-    def write_detections(self, image_path: Path, output_dir: Path) -> Path | None:
-        if not self.detections:
-            return None
+    def write_detections(self, image_path: Path, output_dir: Path) -> Path:
+        # Always write a sidecar — empty `detections` means the frame was
+        # processed and came back clean. The CLI uses sidecar existence as
+        # the resume primitive: "sidecar present" ⇒ "skip on rerun". The
+        # report + blur steps filter on `detections != []` so empty files
+        # remain inert for the rest of the pipeline.
         output_path = output_dir / f"{image_path.stem}.json"
         payload = {
             "frame": image_path.name,

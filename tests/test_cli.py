@@ -87,26 +87,7 @@ def test_cli_calls_write_detections_per_frame(tmp_path):
     assert instance.write_detections.call_count == 3
 
 
-def test_cli_counts_only_truthy_write_returns_as_written(tmp_path):
-    d = tmp_path / "frames"
-    d.mkdir()
-    _make_frames(d, 3)
-
-    with patch("screenredact.detector.FrameAnalyzer") as FakeAnalyzer:
-        instance = FakeAnalyzer.return_value
-        # Second frame yields a sidecar Path, others return None (no detections):
-        instance.write_detections.side_effect = [
-            None,
-            d / "frame_000001.json",
-            None,
-        ]
-        result = runner.invoke(app, ["detect", str(d)])
-
-    assert result.exit_code == 0
-    assert "Wrote 1 detection file(s)" in result.stdout
-
-
-def test_cli_reports_total_frame_count(tmp_path):
+def test_cli_reports_analyzed_over_total(tmp_path):
     d = tmp_path / "frames"
     d.mkdir()
     _make_frames(d, 2)
@@ -116,7 +97,65 @@ def test_cli_reports_total_frame_count(tmp_path):
         result = runner.invoke(app, ["detect", str(d)])
 
     assert result.exit_code == 0
-    assert "Analyzed 2 frame(s)" in result.stdout
+    assert "Analyzed 2/2 frame(s)" in result.stdout
+
+
+def test_cli_detect_skips_frames_with_existing_sidecar(tmp_path):
+    d = tmp_path / "frames"
+    d.mkdir()
+    _make_frames(d, 3)
+    # Resume primitive: a pre-existing sidecar means the frame was processed
+    # on a prior run. The detect loop must not re-invoke OCR for it.
+    (d / "frame_000001.json").write_text('{"frame":"frame_000001.png","detections":[]}')
+
+    with patch("screenredact.detector.FrameAnalyzer") as FakeAnalyzer:
+        instance = FakeAnalyzer.return_value
+        instance.write_detections.return_value = None
+        result = runner.invoke(app, ["detect", str(d)])
+
+    assert result.exit_code == 0
+    assert instance.analyze_frame.call_count == 2
+    assert "Analyzed 2/3 frame(s)" in result.stdout
+    assert "skipped 1 already-processed" in result.stdout
+
+
+def test_cli_detect_excludes_blurred_pngs_from_input(tmp_path):
+    # After a `blur` pass the frames dir contains both originals and
+    # `_blurred.png` siblings. Detect must not OCR the blurred copies or
+    # it'd drop stray `*_blurred.json` sidecars and waste time.
+    d = tmp_path / "frames"
+    d.mkdir()
+    _make_frames(d, 2)
+    (d / "frame_000000_blurred.png").write_bytes(b"fake-blurred")
+    (d / "frame_000001_blurred.png").write_bytes(b"fake-blurred")
+
+    with patch("screenredact.detector.FrameAnalyzer") as FakeAnalyzer:
+        instance = FakeAnalyzer.return_value
+        instance.write_detections.return_value = None
+        result = runner.invoke(app, ["detect", str(d)])
+
+    assert result.exit_code == 0
+    # Only the two originals counted — the two `_blurred.png` were excluded.
+    assert "Analyzed 2/2 frame(s)" in result.stdout
+    called_paths = [call.args[0] for call in instance.analyze_frame.call_args_list]
+    assert all("_blurred" not in p.name for p in called_paths)
+
+
+def test_cli_detect_skips_all_when_fully_resumed(tmp_path):
+    d = tmp_path / "frames"
+    d.mkdir()
+    _make_frames(d, 2)
+    for i in range(2):
+        (d / f"frame_{i:06d}.json").write_text('{"frame":"x","detections":[]}')
+
+    with patch("screenredact.detector.FrameAnalyzer") as FakeAnalyzer:
+        instance = FakeAnalyzer.return_value
+        result = runner.invoke(app, ["detect", str(d)])
+
+    assert result.exit_code == 0
+    instance.analyze_frame.assert_not_called()
+    assert "Analyzed 0/2 frame(s)" in result.stdout
+    assert "skipped 2 already-processed" in result.stdout
 
 
 # ---------------------------------------------------------------------------
@@ -410,20 +449,36 @@ def test_blur_writes_blurred_png_for_frames_with_detections(tmp_path):
     assert args[2] == tmp_path / "frame_000000_blurred.png"
 
 
-def test_blur_excludes_existing_blurred_outputs_from_input(tmp_path):
-    _make_frames(tmp_path, 1)
-    # Pre-existing blurred output from a prior run — must not be re-processed:
+def test_blur_excludes_blurred_pngs_from_input_glob(tmp_path):
+    # A frame with no original PNG sibling (only the `_blurred.png` exists)
+    # must not show up as an input candidate — otherwise we'd try to blur a
+    # `_blurred.png` as if it were a fresh frame.
     (tmp_path / "frame_000000_blurred.png").write_bytes(b"already-blurred")
+
+    with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
+        result = runner.invoke(app, ["blur", str(tmp_path)])
+
+    assert result.exit_code == 1  # no input frames after excluding *_blurred
+    FakeBlurrer.return_value.blur_and_write.assert_not_called()
+
+
+def test_blur_skips_frames_whose_blurred_output_already_exists(tmp_path):
+    # Resume primitive: the `_blurred.png` exists from a prior run — skip so
+    # we don't redo the Gaussian pass. The input glob already excluded the
+    # _blurred file itself; this test covers the skip on the base frame.
+    _make_frames(tmp_path, 1)
     _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    pre = tmp_path / "frame_000000_blurred.png"
+    pre.write_bytes(b"already-blurred")
 
     with patch("screenredact.blurrer.FrameBlurrer") as FakeBlurrer:
         result = runner.invoke(app, ["blur", str(tmp_path)])
 
     assert result.exit_code == 0
-    # One real frame with detections -> one call; the pre-existing blurred
-    # output should have been filtered out of the input glob entirely.
-    assert FakeBlurrer.return_value.blur_and_write.call_count == 1
-    assert "Blurred 1/1" in result.stdout
+    FakeBlurrer.return_value.blur_and_write.assert_not_called()
+    assert pre.read_bytes() == b"already-blurred"  # untouched
+    assert "Blurred 0/1" in result.stdout
+    assert "skipped 1 already-blurred" in result.stdout
 
 
 def test_blur_stdout_reports_blurred_over_total(tmp_path):
@@ -463,17 +518,18 @@ def test_blur_tolerates_malformed_sidecar_json(tmp_path):
     assert FakeBlurrer.return_value.blur_and_write.call_count == 1
 
 
-def test_blur_overwrites_existing_blurred_output(tmp_path):
+def test_blur_preserves_existing_blurred_output(tmp_path):
+    # Inverse of the old overwrite test. The resume semantics now require
+    # that an existing `_blurred.png` stays byte-identical — re-runs must
+    # not redo the blur pass. If the user wants to re-blur, delete the
+    # existing output file first.
     _make_frames(tmp_path, 1)
     _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
     pre = tmp_path / "frame_000000_blurred.png"
-    pre.write_bytes(b"stale-output")
+    pre.write_bytes(b"from-prior-run")
 
-    # Use the real FrameBlurrer + conftest's cv2 stub (which writes bytes
-    # via imwrite) to verify the on-disk file actually gets rewritten.
     result = runner.invoke(app, ["blur", str(tmp_path)])
 
     assert result.exit_code == 0
-    assert pre.read_bytes() != b"stale-output"
-    # Original frame is never touched:
+    assert pre.read_bytes() == b"from-prior-run"  # untouched
     assert (tmp_path / "frame_000000.png").read_bytes() == b"fake"

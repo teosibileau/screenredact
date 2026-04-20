@@ -58,22 +58,36 @@ def detect(
     out = output_dir or frames_dir
     out.mkdir(parents=True, exist_ok=True)
 
-    frames = sorted(frames_dir.glob("*.png"))
+    # Exclude `_blurred.png` siblings that a prior `blur` pass may have
+    # written into the same directory — those aren't real source frames and
+    # re-OCRing them would both waste time and drop stray sidecars.
+    frames = sorted(p for p in frames_dir.glob("*.png") if not p.stem.endswith("_blurred"))
     if not frames:
         typer.echo(f"No PNG frames found in {frames_dir}", err=True)
         raise typer.Exit(1)
 
-    written = 0
+    processed = 0
+    skipped = 0
     with Progress() as progress:
         task = progress.add_task("Analyzing frames", total=len(frames))
         for frame in frames:
+            # Resume primitive: a sidecar means the frame was processed on a
+            # previous run (possibly with empty detections). Skip to avoid
+            # paying the OCR cost again.
+            if (out / f"{frame.stem}.json").exists():
+                skipped += 1
+                progress.update(task, advance=1)
+                continue
             analyzer = FrameAnalyzer(lang=lang)
             analyzer.analyze_frame(frame)
-            if analyzer.write_detections(frame, out):
-                written += 1
+            analyzer.write_detections(frame, out)
+            processed += 1
             progress.update(task, advance=1)
 
-    typer.echo(f"Analyzed {len(frames)} frame(s). Wrote {written} detection file(s) to {out}/")
+    summary = f"Analyzed {processed}/{len(frames)} frame(s). Wrote sidecars to {out}/"
+    if skipped:
+        summary += f" (skipped {skipped} already-processed)"
+    typer.echo(summary)
 
 
 @app.command()
@@ -128,11 +142,18 @@ def blur(
 
     blurrer = FrameBlurrer(padding=padding)
     blurred = 0
+    skipped = 0
     with Progress() as progress:
         task = progress.add_task("Blurring frames", total=len(frames))
         for frame in frames:
-            sidecar = frames_dir / f"{frame.stem}.json"
             progress.update(task, advance=1)
+            output_path = frames_dir / f"{frame.stem}_blurred.png"
+            # Resume primitive: the blurred sibling already exists from a prior
+            # run. Skip so reruns don't redo the Gaussian pass.
+            if output_path.exists():
+                skipped += 1
+                continue
+            sidecar = frames_dir / f"{frame.stem}.json"
             if not sidecar.exists():
                 continue
             try:
@@ -142,11 +163,13 @@ def blur(
             detections = payload.get("detections") if isinstance(payload, dict) else None
             if not detections:
                 continue
-            output_path = frames_dir / f"{frame.stem}_blurred.png"
             blurrer.blur_and_write(frame, detections, output_path)
             blurred += 1
 
-    typer.echo(f"Blurred {blurred}/{len(frames)} frame(s). Outputs at {frames_dir}/*_blurred.png")
+    summary = f"Blurred {blurred}/{len(frames)} frame(s). Outputs at {frames_dir}/*_blurred.png"
+    if skipped:
+        summary += f" (skipped {skipped} already-blurred)"
+    typer.echo(summary)
 
 
 if __name__ == "__main__":

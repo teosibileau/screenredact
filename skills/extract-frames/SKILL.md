@@ -40,6 +40,20 @@ mkdir -p "<OUT>"
 
 ### 3. Extract every frame
 
+Resume check first — if `source.json` exists and its `frame_count` matches the PNGs already on disk, the extract was done by a prior run and we skip ffmpeg:
+
+```bash
+if [ -f "<OUT>/source.json" ]; then
+  # Count only the originals — exclude any *_blurred.png siblings that a
+  # later `blur-frames` pass may have written into the same directory.
+  have=$(find "<OUT>" -maxdepth 1 -name 'frame_*.png' -not -name '*_blurred.png' | wc -l | tr -d ' ')
+  want=$(jq -r '.frame_count' "<OUT>/source.json")
+  [ "$have" = "$want" ] && echo "already extracted ($have frames); skipping" && exit 0
+fi
+```
+
+Otherwise extract:
+
 ```bash
 ffmpeg -i "<INPUT>" \
   -fps_mode passthrough \
@@ -50,6 +64,7 @@ ffmpeg -i "<INPUT>" \
 - `-fps_mode passthrough` preserves the exact frame sequence — no duplicates inserted, no frames dropped. This is critical for round-trip integrity.
 - `-compression_level 1` — PNG is lossless regardless; this only trades encode speed vs. file size. `1` is fast; bump to `9` only if disk space matters more than time.
 - `%06d` handles up to ~1M frames. Use `%07d` for longer videos.
+- Partial extracts (a Ctrl-C'd run) are rare since the full extract is ~5 s for thousands of frames; the resume check above mostly prevents needless re-extracts of a complete directory.
 
 ### 4. Extract the audio track (if present)
 

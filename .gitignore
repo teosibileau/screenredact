@@ -22,3 +22,8 @@ dist/
 
 # Project: hidden frame output dirs
 .*_frames/
+
+.claude
+.claude/*
+
+*.mp4
