@@ -1,37 +1,37 @@
-# AGENT.md
+# 🤖 AGENT.md
 
-`screenredact` redacts PII (emails, phone numbers, credit cards, addresses) from screen recordings. The pipeline decomposes a video into lossless PNGs, OCRs every frame with Apple's Vision framework, runs Presidio PII recognition over the recognized text, Gaussian-blurs the matched regions, then reassembles the redacted frames back into a playable file. macOS-only.
+`screenredact` redacts PII (emails, phone numbers, credit cards, addresses) from screen recordings. The pipeline decomposes a video into lossless PNGs, OCRs every frame with Apple's Vision framework, runs Presidio PII recognition over the recognized text, Gaussian-blurs the matched regions, then reassembles the redacted frames back into a playable file. 🍎 macOS-only.
 
-## Pipeline
+## 🧩 Pipeline
 
 Four skills chain in sequence. Every skill consumes the previous one's artefacts from a single hidden directory (`./.<video-basename>_frames/`) and writes its own outputs back into the same place. All outputs are gitignored via the `.*_frames/` pattern.
 
 ```text
 video.mov
    │
-   ▼  extract-frames
+   ▼  🎬 extract-frames
 .<video>_frames/
    ├─ frame_NNNNNN.png    (lossless, one per source frame)
    ├─ source.json         (framerate, pix_fmt, audio metadata, frame_count)
    └─ audio.<ext>         (only when the source has audio)
    │
-   ▼  detect-frames
+   ▼  🔎 detect-frames
 .<video>_frames/
    ├─ <stem>.json         (one per frame with ≥1 PII hit; clean frames produce no file)
    └─ report.json         (aggregate rollup across all sidecars)
    │
-   ▼  blur-frames
+   ▼  🫧 blur-frames
 .<video>_frames/
    └─ <stem>_blurred.png  (Gaussian-blurred copy sibling to the original)
    │
-   ▼  reassemble-video
+   ▼  🎞️ reassemble-video
 <video>_redacted.mp4      (in the CWD, alongside the source)
    + concat.txt (kept in the frames dir for inspection)
 ```
 
 Each step is documented in full at `skills/<name>/SKILL.md` — read the skill before invoking it.
 
-### Orchestration rules
+### 📏 Orchestration rules
 
 - **Never skip a step.** If a later skill is invoked before its predecessor ran, each skill stops and routes the user back.
 - **Naming conventions are load-bearing.** Downstream globs depend on `frame_NNNNNN.png`, `<stem>.json`, `<stem>_blurred.png`, `source.json`. Don't let users override the frames dir path or the `_blurred.png` suffix, even if they ask.
@@ -39,14 +39,14 @@ Each step is documented in full at `skills/<name>/SKILL.md` — read the skill b
 - **Originals are never modified.** Every step writes a new sibling or nothing. Undo = delete the derived file.
 - **Ctrl-C is safe everywhere.** Files are written atomically; re-running picks up where it left off.
 
-## Guardrails
+## 🚨 Guardrails
 
-- **macOS only.** `ocrmac` wraps Apple Vision through pyobjc. Linux/Windows installs fail at dep resolution — intentional.
-- **Don't re-encode frames.** The pipeline is lossless up to reassembly; the final mux is the only encode step.
-- **Don't delete the `.*_frames/` dir mid-pipeline without user confirmation.** It contains hours of OCR work even on a modest video.
-- **`source.json` is the contract.** If its shape changes, `reassemble-video` breaks silently. Fields the pipeline relies on: `frame_rate`, `pix_fmt`, `frame_count`, `audio` (object or `null`).
+- 🍎 **macOS only.** `ocrmac` wraps Apple Vision through pyobjc. Linux/Windows installs fail at dep resolution — intentional.
+- 🔒 **Don't re-encode frames.** The pipeline is lossless up to reassembly; the final mux is the only encode step.
+- ⚠️ **Don't delete the `.*_frames/` dir mid-pipeline without user confirmation.** It contains hours of OCR work even on a modest video.
+- 📜 **`source.json` is the contract.** If its shape changes, `reassemble-video` breaks silently. Fields the pipeline relies on: `frame_rate`, `pix_fmt`, `frame_count`, `audio` (object or `null`).
 
-## Environment setup
+## 🧰 Environment setup
 
 Bring a fresh macOS machine from zero to running `screenredact`.
 
