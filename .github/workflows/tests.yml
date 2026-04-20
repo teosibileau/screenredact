@@ -6,10 +6,14 @@ on:
     paths:
       - 'screenredact/**'
       - 'tests/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
   pull_request:
     paths:
       - 'screenredact/**'
       - 'tests/**'
+      - 'pyproject.toml'
+      - 'poetry.lock'
 
 jobs:
   pytest:
