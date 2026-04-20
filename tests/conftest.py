@@ -1,4 +1,4 @@
-"""Shared fixtures. Heavy deps (PaddleOCR, Presidio) are never imported in tests —
+"""Shared fixtures. Heavy deps (ocrmac, Presidio) are never imported in tests —
 both are patched at the module boundary so tests are fast and hermetic."""
 
 from __future__ import annotations
@@ -6,7 +6,6 @@ from __future__ import annotations
 import struct
 import sys
 import zlib
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -40,9 +39,11 @@ def _minimal_png_bytes() -> bytes:
 
 # --- Stub modules ------------------------------------------------------------
 # Without these stubs, importing `screenredact.detector` would trigger
-# `import paddleocr` / `import presidio_analyzer`, which pull in large
-# ML dependencies (and need downloaded models). We replace them with
-# do-nothing module stubs that only expose the symbols detector.py uses.
+# `from ocrmac import ocrmac` + `from PIL import Image` + `from presidio_analyzer
+# import AnalyzerEngine`, which pull in the Vision framework bridge, Pillow,
+# and Presidio's spaCy-backed recognizers. We replace them with do-nothing
+# module stubs that only expose the symbols detector.py uses, and rely on
+# monkeypatching for per-test behaviour.
 
 
 def _install_stub_module(name: str, **attrs: Any) -> ModuleType:
@@ -53,12 +54,16 @@ def _install_stub_module(name: str, **attrs: Any) -> ModuleType:
     return module
 
 
-class _StubPaddleOCR:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.init_args = args
+class _StubOcrmacOCR:
+    """Default no-op OCR. Tests that need per-case output monkeypatch this
+    via `screenredact.detector.ocrmac.OCR`.
+    """
+
+    def __init__(self, image: Any, **kwargs: Any) -> None:
+        self.image = image
         self.init_kwargs = kwargs
 
-    def predict(self, *_args: Any, **_kwargs: Any) -> list:
+    def recognize(self, px: bool = False) -> list:
         return []
 
 
@@ -68,6 +73,25 @@ class _StubAnalyzerEngine:
 
     def analyze(self, *_args: Any, **_kwargs: Any) -> list:
         return []
+
+
+class _StubPilImage:
+    """Context-manager-compatible stand-in for `PIL.Image.Image`. Only exposes
+    `.size`, which is what detector.py reads. Default matches the size tests
+    use when computing expected bbox values (1000x500)."""
+
+    def __init__(self, size: tuple[int, int] = (1000, 500)) -> None:
+        self.size = size
+
+    def __enter__(self) -> _StubPilImage:
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        pass
+
+
+def _stub_pil_open(_path: Any) -> _StubPilImage:
+    return _StubPilImage()
 
 
 class _StubImage:
@@ -102,7 +126,17 @@ def _stub_gaussian_blur(src: Any, ksize: Any, _sigma: Any, *_args: Any, **_kwarg
     return ("blurred", src, ksize)
 
 
-_install_stub_module("paddleocr", PaddleOCR=_StubPaddleOCR)
+# `ocrmac` is a package whose interesting symbols live on its submodule
+# `ocrmac.ocrmac`. `from ocrmac import ocrmac` resolves through both entries
+# in sys.modules, so stub both.
+_ocrmac_submodule = _install_stub_module("ocrmac.ocrmac", OCR=_StubOcrmacOCR)
+_install_stub_module("ocrmac", ocrmac=_ocrmac_submodule)
+
+# Same pattern for PIL — `from PIL import Image` resolves `Image` as an
+# attribute on the `PIL` package *and* as the submodule `PIL.Image`.
+_pil_image_submodule = _install_stub_module("PIL.Image", open=_stub_pil_open)
+_install_stub_module("PIL", Image=_pil_image_submodule)
+
 _install_stub_module("presidio_analyzer", AnalyzerEngine=_StubAnalyzerEngine)
 _install_stub_module(
     "cv2",
@@ -115,28 +149,6 @@ _install_stub_module(
 # --- Fixtures ---------------------------------------------------------------
 
 
-@dataclass
-class FakePiiResult:
-    entity_type: str
-    start: int
-    end: int
-    score: float
-
-
-class FakeOcrResult:
-    """Mimics the PaddleOCR 3.x result object (attribute access)."""
-
-    def __init__(
-        self,
-        rec_texts: list[str],
-        rec_scores: list[float],
-        rec_polys: list[list[list[float]]],
-    ) -> None:
-        self.rec_texts = rec_texts
-        self.rec_scores = rec_scores
-        self.rec_polys = rec_polys
-
-
 @pytest.fixture
 def frames_dir(tmp_path: Path) -> Path:
     d = tmp_path / "frames"
@@ -144,13 +156,3 @@ def frames_dir(tmp_path: Path) -> Path:
     for i in range(3):
         (d / f"frame_{i:06d}.png").write_bytes(b"fake-png")
     return d
-
-
-@pytest.fixture
-def fake_ocr_result():
-    return FakeOcrResult
-
-
-@pytest.fixture
-def fake_pii_result():
-    return FakePiiResult

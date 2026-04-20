@@ -1,5 +1,5 @@
-"""Unit tests for screenredact.detector — OCR output normalisation,
-PII mapping, and JSON sidecar writing."""
+"""Unit tests for screenredact.detector — rect→bbox conversion, ocrmac +
+Presidio orchestration, and JSON sidecar writing."""
 
 from __future__ import annotations
 
@@ -12,111 +12,77 @@ import pytest
 from screenredact.detector import PII_ENTITIES, Detection, FrameAnalyzer
 
 
+def _flat_bbox(bbox: list[list[float]]) -> list[float]:
+    # Flatten so pytest.approx can compare with a tolerance — the (1-y-h)*h
+    # arithmetic in `_rect_to_bbox` routinely lands a ULP or two off from the
+    # obvious integer, and exact equality would be spuriously brittle.
+    return [c for row in bbox for c in row]
+
+
 @pytest.fixture(autouse=True)
 def _reset_frameanalyzer_caches():
-    # FrameAnalyzer caches PaddleOCR + Presidio at the class level so models
-    # load once per process. Tests monkey-patch those cached instances and
-    # would leak into each other without a reset between tests.
-    FrameAnalyzer._ocr_cache.clear()
+    # FrameAnalyzer caches Presidio at the class level so the analyzer loads
+    # once per process. Tests monkeypatch that cached instance, so without a
+    # reset the patches leak into each other.
     FrameAnalyzer._analyzer = None
     yield
-    FrameAnalyzer._ocr_cache.clear()
     FrameAnalyzer._analyzer = None
 
 
 # ---------------------------------------------------------------------------
-# FrameAnalyzer._extract_ocr_fields (staticmethod)
+# FrameAnalyzer._rect_to_bbox (staticmethod — pure coord math)
 # ---------------------------------------------------------------------------
 
 
-class _HasAttrs:
-    def __init__(self, **attrs):
-        for k, v in attrs.items():
-            setattr(self, k, v)
+def test_rect_to_bbox_full_frame_spans_image():
+    # rect=(0,0,1,1) covers the whole image. Vision's bottom-left origin
+    # flipped to top-left produces y1=0 (top) and y2=h (bottom).
+    bbox = FrameAnalyzer._rect_to_bbox((0.0, 0.0, 1.0, 1.0), 1000, 500)
+    assert bbox == [[0.0, 0.0], [1000.0, 0.0], [1000.0, 500.0], [0.0, 500.0]]
 
 
-def test_extract_fields_from_object_attributes():
-    obj = _HasAttrs(
-        rec_texts=["hello"],
-        rec_scores=[0.9],
-        rec_polys=[[[0, 0], [1, 0], [1, 1], [0, 1]]],
-    )
-    texts, scores, polys = FrameAnalyzer._extract_ocr_fields(obj)
-    assert texts == ["hello"]
-    assert scores == [0.9]
-    assert polys == [[[0, 0], [1, 0], [1, 1], [0, 1]]]
+def test_rect_to_bbox_y_flip_to_pixel_coords():
+    # Vision rect at (x=0.1, y=0.9) with size (0.3, 0.05) on a 1000x500 image:
+    #   x1 = 0.1*1000 = 100
+    #   x2 = 0.4*1000 = 400
+    #   y1 = (1 - 0.9 - 0.05)*500 = 25    (top edge in pixel space)
+    #   y2 = (1 - 0.9)*500         = 50    (bottom edge in pixel space)
+    bbox = FrameAnalyzer._rect_to_bbox((0.1, 0.9, 0.3, 0.05), 1000, 500)
+    expected = [[100.0, 25.0], [400.0, 25.0], [400.0, 50.0], [100.0, 50.0]]
+    assert _flat_bbox(bbox) == pytest.approx(_flat_bbox(expected), abs=1e-6)
 
 
-def test_extract_fields_from_dict():
-    d = {
-        "rec_texts": ["a", "b"],
-        "rec_scores": [0.8, 0.7],
-        "rec_polys": [[[0, 0]], [[1, 1]]],
-    }
-    texts, scores, polys = FrameAnalyzer._extract_ocr_fields(d)
-    assert texts == ["a", "b"]
-    assert scores == [0.8, 0.7]
-    assert polys == [[[0, 0]], [[1, 1]]]
-
-
-def test_extract_fields_missing_attrs_return_empty():
-    assert FrameAnalyzer._extract_ocr_fields(_HasAttrs()) == ([], [], [])
-
-
-def test_extract_fields_missing_dict_keys_return_empty():
-    assert FrameAnalyzer._extract_ocr_fields({}) == ([], [], [])
-
-
-def test_extract_fields_none_values_treated_as_empty():
-    obj = _HasAttrs(rec_texts=None, rec_scores=None, rec_polys=None)
-    assert FrameAnalyzer._extract_ocr_fields(obj) == ([], [], [])
-
-
-def test_extract_fields_mixed_shape_object_and_dict_keys():
-    obj = _HasAttrs(rec_texts=["only"])
-    texts, scores, polys = FrameAnalyzer._extract_ocr_fields(obj)
-    assert texts == ["only"]
-    assert scores == []
-    assert polys == []
-
-
-def test_extract_fields_unexpected_type_does_not_crash():
-    assert FrameAnalyzer._extract_ocr_fields(42) == ([], [], [])
-    assert FrameAnalyzer._extract_ocr_fields("string") == ([], [], [])
-    assert FrameAnalyzer._extract_ocr_fields(None) == ([], [], [])
-
-
-def test_extract_ocr_fields_callable_without_instance():
-    # Staticmethod — callable off the class directly:
-    assert FrameAnalyzer._extract_ocr_fields({}) == ([], [], [])
+def test_rect_to_bbox_clockwise_from_top_left():
+    # Downstream blurrer expects the 4-point polygon ordered clockwise from
+    # the top-left corner. Lock that contract here.
+    bbox = FrameAnalyzer._rect_to_bbox((0.2, 0.3, 0.1, 0.1), 800, 400)
+    tl, tr, br, bl = bbox
+    assert tl[0] < tr[0] and tl[1] == tr[1]  # top edge, left to right
+    assert tr[1] < br[1] and tr[0] == br[0]  # right edge, top to bottom
+    assert br[0] > bl[0] and br[1] == bl[1]  # bottom edge, right to left
+    assert bl[1] > tl[1] and bl[0] == tl[0]  # left edge, bottom to top
 
 
 # ---------------------------------------------------------------------------
-# Class-level caching of PaddleOCR + Presidio
+# Class-level Presidio cache + instance init
 # ---------------------------------------------------------------------------
-
-
-def test_multiple_analyzers_share_ocr_per_lang():
-    a = FrameAnalyzer(lang="en")
-    b = FrameAnalyzer(lang="en")
-    assert a.ocr is b.ocr
-
-
-def test_different_langs_get_different_ocr_instances():
-    en = FrameAnalyzer(lang="en")
-    es = FrameAnalyzer(lang="es")
-    assert en.ocr is not es.ocr
 
 
 def test_multiple_analyzers_share_presidio_engine():
-    a = FrameAnalyzer(lang="en")
-    b = FrameAnalyzer(lang="es")
+    a = FrameAnalyzer()
+    b = FrameAnalyzer(lang="de-DE")
     assert a.analyzer is b.analyzer
 
 
 def test_analyzer_initializes_detections_as_empty_list():
     a = FrameAnalyzer()
     assert a.detections == []
+
+
+def test_analyzer_default_lang_is_bcp47_english():
+    # Apple Vision takes BCP-47 codes ("en-US"), not ISO-639 ("en"). Lock
+    # the default so a casual `FrameAnalyzer()` call keeps working.
+    assert FrameAnalyzer().lang == "en-US"
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +111,6 @@ def test_detection_asdict_round_trips_via_json():
 # ---------------------------------------------------------------------------
 
 
-class _FakeOcrResult:
-    def __init__(self, rec_texts, rec_scores, rec_polys):
-        self.rec_texts = rec_texts
-        self.rec_scores = rec_scores
-        self.rec_polys = rec_polys
-
-
 class _FakePiiResult:
     def __init__(self, entity_type, start, end, score):
         self.entity_type = entity_type
@@ -162,69 +121,80 @@ class _FakePiiResult:
 
 @pytest.fixture
 def analyzer():
-    """FrameAnalyzer with stubbed OCR/Presidio (from conftest)."""
+    """FrameAnalyzer with stubbed Presidio (from conftest)."""
     return FrameAnalyzer()
 
 
-def _set_ocr(analyzer: FrameAnalyzer, results):
-    analyzer.ocr.predict = lambda *a, **k: results  # type: ignore[method-assign]
+@pytest.fixture
+def stub_ocr(monkeypatch):
+    """Monkeypatches the ocrmac.OCR class and PIL.Image.open so analyze_frame
+    sees controllable OCR output and image dimensions. Returns a setter
+    the test calls as `stub_ocr(annotations, image_size=(w, h))`.
+    """
+    state: dict = {"annotations": [], "size": (1000, 500)}
+
+    class _FakeOCR:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def recognize(self, px: bool = False):
+            return state["annotations"]
+
+    class _FakeImg:
+        def __init__(self, size):
+            self.size = size
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    monkeypatch.setattr("screenredact.detector.ocrmac.OCR", _FakeOCR)
+    monkeypatch.setattr("screenredact.detector.Image.open", lambda _p: _FakeImg(state["size"]))
+
+    def _configure(annotations, image_size: tuple[int, int] | None = None) -> None:
+        state["annotations"] = list(annotations)
+        if image_size is not None:
+            state["size"] = image_size
+
+    return _configure
 
 
 def _set_pii(analyzer: FrameAnalyzer, fn):
     analyzer.analyzer.analyze = fn  # type: ignore[method-assign]
 
 
-def test_analyze_frame_empty_ocr_returns_no_detections(analyzer):
-    _set_ocr(analyzer, [])
+def test_analyze_frame_empty_ocr_returns_no_detections(analyzer, stub_ocr):
+    stub_ocr([])
     _set_pii(analyzer, lambda **kw: [])
     assert analyzer.analyze_frame(Path("ignored.png")) == []
 
 
-def test_analyze_frame_none_ocr_returns_no_detections(analyzer):
-    _set_ocr(analyzer, None)
-    assert analyzer.analyze_frame(Path("ignored.png")) == []
-
-
-def test_analyze_frame_skips_empty_text_strings(analyzer):
-    _set_ocr(
-        analyzer,
+def test_analyze_frame_skips_empty_text_strings(analyzer, stub_ocr):
+    stub_ocr(
         [
-            _FakeOcrResult(
-                rec_texts=["", "", ""], rec_scores=[0.9, 0.9, 0.9], rec_polys=[[[0, 0]]] * 3
-            )
-        ],
+            ("", 0.9, (0.0, 0.0, 0.0, 0.0)),
+            ("", 0.9, (0.1, 0.1, 0.1, 0.1)),
+        ]
     )
-    calls = []
+    calls: list = []
     _set_pii(analyzer, lambda **kw: calls.append(kw) or [])
     assert analyzer.analyze_frame(Path("ignored.png")) == []
     assert calls == []
 
 
-def test_analyze_frame_no_pii_returns_empty(analyzer):
-    _set_ocr(
-        analyzer,
-        [
-            _FakeOcrResult(
-                rec_texts=["boring text"], rec_scores=[0.99], rec_polys=[[[0, 0], [1, 1]]]
-            )
-        ],
-    )
+def test_analyze_frame_no_pii_returns_empty(analyzer, stub_ocr):
+    stub_ocr([("boring text", 0.99, (0.1, 0.1, 0.1, 0.1))])
     _set_pii(analyzer, lambda **kw: [])
     assert analyzer.analyze_frame(Path("ignored.png")) == []
 
 
-def test_analyze_frame_single_pii_maps_to_detection(analyzer):
+def test_analyze_frame_single_pii_maps_to_detection(analyzer, stub_ocr):
     text = "Email me at foo@bar.com please"
-    _set_ocr(
-        analyzer,
-        [
-            _FakeOcrResult(
-                rec_texts=[text],
-                rec_scores=[0.97],
-                rec_polys=[[[10, 20], [110, 20], [110, 40], [10, 40]]],
-            )
-        ],
-    )
+    # Vision rect anchored at (x=0.1, y=0.9) with size (0.3, 0.05)
+    # at the default 1000x500 image size → pixel bbox (100,25)-(400,50).
+    stub_ocr([(text, 0.97, (0.1, 0.9, 0.3, 0.05))])
     _set_pii(
         analyzer,
         lambda text, **kw: [_FakePiiResult("EMAIL_ADDRESS", 12, 23, 1.0)],
@@ -237,17 +207,15 @@ def test_analyze_frame_single_pii_maps_to_detection(analyzer):
     assert d.type == "EMAIL_ADDRESS"
     assert d.text == "foo@bar.com"
     assert d.line_text == text
-    assert d.bbox == [[10.0, 20.0], [110.0, 20.0], [110.0, 40.0], [10.0, 40.0]]
+    expected_bbox = [[100.0, 25.0], [400.0, 25.0], [400.0, 50.0], [100.0, 50.0]]
+    assert _flat_bbox(d.bbox) == pytest.approx(_flat_bbox(expected_bbox), abs=1e-6)
     assert d.ocr_confidence == pytest.approx(0.97)
     assert d.pii_score == pytest.approx(1.0)
 
 
-def test_analyze_frame_multiple_pii_in_same_line(analyzer):
+def test_analyze_frame_multiple_pii_in_same_line(analyzer, stub_ocr):
     text = "foo@bar.com or call +1 555 1234"
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=[text], rec_scores=[0.9], rec_polys=[[[0, 0]]])],
-    )
+    stub_ocr([(text, 0.9, (0.0, 0.0, 1.0, 1.0))])
     _set_pii(
         analyzer,
         lambda text, **kw: [
@@ -261,19 +229,16 @@ def test_analyze_frame_multiple_pii_in_same_line(analyzer):
     assert [d.type for d in detections] == ["EMAIL_ADDRESS", "PHONE_NUMBER"]
     assert detections[0].text == "foo@bar.com"
     assert detections[1].text == "+1 555 1234"
+    # Same OCR line → same bbox on both detections.
     assert detections[0].bbox == detections[1].bbox
 
 
-def test_analyze_frame_multiple_ocr_lines(analyzer):
-    _set_ocr(
-        analyzer,
+def test_analyze_frame_multiple_ocr_lines(analyzer, stub_ocr):
+    stub_ocr(
         [
-            _FakeOcrResult(
-                rec_texts=["first@line.com", "second"],
-                rec_scores=[0.9, 0.9],
-                rec_polys=[[[0, 0]], [[5, 5]]],
-            )
-        ],
+            ("first@line.com", 0.9, (0.0, 0.9, 0.2, 0.05)),
+            ("second", 0.9, (0.0, 0.1, 0.1, 0.05)),
+        ]
     )
 
     def _analyze(text, **kw):
@@ -285,25 +250,21 @@ def test_analyze_frame_multiple_ocr_lines(analyzer):
 
     detections = analyzer.analyze_frame(Path("ignored.png"))
     assert len(detections) == 1
-    assert detections[0].bbox == [[0.0, 0.0]]  # from first polygon
+    # First rect at y=0.9, h=0.05 on a 1000x500 image:
+    #   x1=0, x2=200, y1=(1-0.95)*500=25, y2=(1-0.9)*500=50
+    expected = [[0.0, 25.0], [200.0, 25.0], [200.0, 50.0], [0.0, 50.0]]
+    assert _flat_bbox(detections[0].bbox) == pytest.approx(_flat_bbox(expected), abs=1e-6)
 
 
-def test_analyze_frame_bbox_coerces_numeric_types(analyzer):
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=["a"], rec_scores=[1], rec_polys=[[[1, 2], [3, 4]]])],
-    )
+def test_analyze_frame_bbox_coerces_numeric_types(analyzer, stub_ocr):
+    stub_ocr([("a", 1, (0.5, 0.5, 0.1, 0.1))])
     _set_pii(analyzer, lambda **kw: [_FakePiiResult("EMAIL_ADDRESS", 0, 1, 1.0)])
     det = analyzer.analyze_frame(Path("ignored.png"))[0]
-    assert det.bbox == [[1.0, 2.0], [3.0, 4.0]]
     assert all(isinstance(c, float) for row in det.bbox for c in row)
 
 
-def test_analyze_frame_passes_expected_entities_to_presidio(analyzer):
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=["text"], rec_scores=[0.9], rec_polys=[[[0, 0]]])],
-    )
+def test_analyze_frame_passes_expected_entities_to_presidio(analyzer, stub_ocr):
+    stub_ocr([("text", 0.9, (0.0, 0.0, 0.1, 0.1))])
     captured: dict = {}
 
     def _capture(**kw):
@@ -314,6 +275,60 @@ def test_analyze_frame_passes_expected_entities_to_presidio(analyzer):
     analyzer.analyze_frame(Path("ignored.png"))
     assert captured["entities"] == PII_ENTITIES
     assert captured["language"] == "en"
+
+
+def test_analyze_frame_forwards_lang_to_ocrmac(analyzer, monkeypatch):
+    # Catch the kwargs ocrmac.OCR was constructed with so we can assert the
+    # BCP-47 language_preference plumbing still works end-to-end.
+    captured_kwargs: dict = {}
+
+    class _FakeOCR:
+        def __init__(self, *_args, **kwargs):
+            captured_kwargs.update(kwargs)
+
+        def recognize(self, px: bool = False):
+            return []
+
+    class _FakeImg:
+        size = (1000, 500)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    monkeypatch.setattr("screenredact.detector.ocrmac.OCR", _FakeOCR)
+    monkeypatch.setattr("screenredact.detector.Image.open", lambda _p: _FakeImg())
+
+    FrameAnalyzer(lang="de-DE").analyze_frame(Path("ignored.png"))
+    assert captured_kwargs.get("language_preference") == ["de-DE"]
+
+
+def test_analyze_frame_empty_lang_sends_no_language_preference(monkeypatch):
+    captured_kwargs: dict = {}
+
+    class _FakeOCR:
+        def __init__(self, *_args, **kwargs):
+            captured_kwargs.update(kwargs)
+
+        def recognize(self, px: bool = False):
+            return []
+
+    class _FakeImg:
+        size = (1000, 500)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    monkeypatch.setattr("screenredact.detector.ocrmac.OCR", _FakeOCR)
+    monkeypatch.setattr("screenredact.detector.Image.open", lambda _p: _FakeImg())
+
+    FrameAnalyzer(lang="").analyze_frame(Path("ignored.png"))
+    assert captured_kwargs.get("language_preference") is None
 
 
 def test_pii_entities_cover_all_required_categories():
@@ -328,11 +343,8 @@ def test_pii_entities_cover_all_required_categories():
 # ---------------------------------------------------------------------------
 
 
-def test_analyze_frame_stores_detections_on_self(analyzer):
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=["a@b.com"], rec_scores=[0.9], rec_polys=[[[0, 0]]])],
-    )
+def test_analyze_frame_stores_detections_on_self(analyzer, stub_ocr):
+    stub_ocr([("a@b.com", 0.9, (0.0, 0.0, 0.1, 0.1))])
     _set_pii(analyzer, lambda **kw: [_FakePiiResult("EMAIL_ADDRESS", 0, 7, 1.0)])
 
     returned = analyzer.analyze_frame(Path("f.png"))
@@ -340,21 +352,14 @@ def test_analyze_frame_stores_detections_on_self(analyzer):
     assert len(analyzer.detections) == 1
 
 
-def test_analyze_frame_resets_detections_each_call(analyzer):
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=["a@b.com"], rec_scores=[0.9], rec_polys=[[[0, 0]]])],
-    )
+def test_analyze_frame_resets_detections_each_call(analyzer, stub_ocr):
+    stub_ocr([("a@b.com", 0.9, (0.0, 0.0, 0.1, 0.1))])
     _set_pii(analyzer, lambda **kw: [_FakePiiResult("EMAIL_ADDRESS", 0, 7, 1.0)])
-
     analyzer.analyze_frame(Path("f1.png"))
     assert len(analyzer.detections) == 1
 
-    # Now a clean frame:
-    _set_ocr(
-        analyzer,
-        [_FakeOcrResult(rec_texts=["nothing"], rec_scores=[0.9], rec_polys=[[[0, 0]]])],
-    )
+    # Clean frame:
+    stub_ocr([("nothing", 0.9, (0.0, 0.0, 0.1, 0.1))])
     _set_pii(analyzer, lambda **kw: [])
     analyzer.analyze_frame(Path("f2.png"))
     assert analyzer.detections == []

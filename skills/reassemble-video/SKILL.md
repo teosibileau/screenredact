@@ -9,9 +9,8 @@ Recompose a redacted video from the frames directory. For each source frame, the
 
 ## Prerequisites
 
-- `ffmpeg` on PATH (the same binary `extract-frames` used).
-- The frames directory must contain `source.json` (written by `extract-frames`). Without it, framerate / pix_fmt / audio metadata are unknown and reassembly is a guess — stop and route back to `extract-frames` if it's missing.
-- Ideally `blur-frames` has been run at least once. If there are no `*_blurred.png` files, the output will be a re-encoded copy of the source with nothing redacted — harmless, but usually not what the user wants. Warn before proceeding.
+- The frames directory contains `source.json` (written by `extract-frames`). Without it, framerate / pix_fmt / audio metadata are unknown and reassembly is a guess — stop and route back to `extract-frames` if it's missing.
+- Ideally `blur-frames` has run at least once. If there are no `*_blurred.png` files, the output will be a re-encoded copy of the source with nothing redacted — harmless, but usually not what the user wants. Warn before proceeding.
 
 ## Inputs
 
@@ -114,4 +113,3 @@ If counts or durations diverge meaningfully, dig in before calling it done — m
 - **The output is a re-encoded derivative, not a container-level round-trip of the source.** libx264 + CRF 18 is the default because it's widely playable and near-lossless. If the user needs the original codec or container preserved, that's a different task — surface it rather than silently switching encoders.
 - **CFR only.** `extract-frames` writes exactly one PNG per source frame, but PNGs carry no timing — so the reassembly is inherently constant-framerate at the source's average rate. For true VFR sources (rare for screen recordings), tiny per-frame timing drift is unavoidable with this pipeline.
 - **10-bit / HDR sources**: if `PIX_FMT` is `yuv420p10le` or similar, libx264 needs a 10-bit build to encode it. If ffmpeg errors out on pix_fmt, swap `libx264` for `libx265` — it handles 10-bit natively.
-- **No new dependencies beyond SETUP.md.** `ffmpeg` was already required by `extract-frames`; `jq` is installed alongside it per `SETUP.md` and is used here for the three `source.json` reads.

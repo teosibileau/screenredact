@@ -96,7 +96,7 @@ From the repo root:
 poetry install
 ```
 
-This creates a virtualenv (cached under `~/Library/Caches/pypoetry/virtualenvs/`) and installs all runtime + dev dependencies. Expect ~500 MB of wheels the first time — PaddlePaddle alone is ~200 MB.
+This creates a virtualenv (cached under `~/Library/Caches/pypoetry/virtualenvs/`) and installs all runtime + dev dependencies. The detect step uses Apple's Vision framework via `ocrmac`, so the runtime group is **macOS-only** — Linux / Windows installs fail at dependency resolution.
 
 ## 3. Download model weights
 
@@ -106,7 +106,7 @@ Presidio's default recognizers rely on spaCy's `en_core_web_lg` model (~700 MB) 
 poetry run python -m spacy download en_core_web_lg
 ```
 
-PaddleOCR pulls its own detection, recognition, and angle-classification weights on first inference and caches them under `~/.paddleocr/`. No manual step needed — the first run of `screenredact detect` will download ~30 MB.
+OCR itself uses Apple's Vision framework through `ocrmac` — no weights to download, no cache directory, and no first-run startup cost beyond loading the framework.
 
 ## Verify
 

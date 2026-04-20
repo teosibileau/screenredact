@@ -180,7 +180,7 @@ def test_cli_lang_option_passed_to_analyzer(tmp_path):
     FakeAnalyzer.assert_called_once_with(lang="es")
 
 
-def test_cli_default_lang_is_en(tmp_path):
+def test_cli_default_lang_is_en_us(tmp_path):
     frames = tmp_path / "frames"
     frames.mkdir()
     _make_frames(frames, 1)
@@ -189,7 +189,7 @@ def test_cli_default_lang_is_en(tmp_path):
         FakeAnalyzer.return_value.write_detections.return_value = None
         runner.invoke(app, ["detect", str(frames)])
 
-    FakeAnalyzer.assert_called_once_with(lang="en")
+    FakeAnalyzer.assert_called_once_with(lang="en-US")
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +207,7 @@ def test_cli_instantiates_analyzer_per_frame(tmp_path):
         runner.invoke(app, ["detect", str(d)])
 
     assert FakeAnalyzer.call_count == 4
-    assert FakeAnalyzer.call_args_list == [call(lang="en")] * 4
+    assert FakeAnalyzer.call_args_list == [call(lang="en-US")] * 4
 
 
 # ---------------------------------------------------------------------------
