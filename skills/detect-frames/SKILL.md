@@ -37,14 +37,15 @@ This is the project's own CLI (registered as `screenredact = "screenredact.cli:a
 
 - Loads Presidio once per process (class-level cache in `screenredact.detector.FrameAnalyzer`); Apple Vision is a framework service with no model-load step
 - Iterates frames in sorted order
-- For each frame: OCRs it through Apple Vision (`ocrmac.OCR(...).recognize()`), runs Presidio over each recognized line, collects any hits as `Detection` records
-- Writes a sidecar JSON **only when the frame has ≥1 detection** — clean frames produce no file
+- **Skips any frame whose `<stem>.json` sidecar already exists** — this is the resume primitive. A Ctrl-C'd run picks up where it left off; a fully-processed dir re-runs in seconds.
+- For each remaining frame: OCRs it through Apple Vision (`ocrmac.OCR(...).recognize()`), runs Presidio over each recognized line, collects hits as `Detection` records
+- Writes a sidecar JSON **for every processed frame** — clean frames get `{"frame": ..., "detections": []}`. Sidecar-exists means "processed", not "has PII". Downstream steps (`blur`, `report`) filter on `detections != []`.
 
 Entity types detected: `EMAIL_ADDRESS`, `PHONE_NUMBER`, `CREDIT_CARD` (Luhn-validated by Presidio), `LOCATION` (address proxy via spaCy NER).
 
 ### 3. Sidecar format
 
-One JSON file per frame-with-detections, named `<frame_stem>.json` next to the PNG:
+One JSON file per processed frame, named `<frame_stem>.json` next to the PNG. Clean frames produce `{"frame": ..., "detections": []}`; frames with hits look like:
 
 ```json
 {

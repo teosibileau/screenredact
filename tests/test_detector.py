@@ -381,15 +381,20 @@ def _sample_detection() -> Detection:
     )
 
 
-def test_write_detections_empty_returns_none(analyzer, tmp_path):
+def test_write_detections_empty_still_writes_sidecar(analyzer, tmp_path):
+    # Sidecar existence is the resume primitive — a sidecar must be written
+    # even for clean frames so a subsequent detect run knows to skip them.
     analyzer.detections = []
-    assert analyzer.write_detections(tmp_path / "frame_1.png", tmp_path) is None
+    out = analyzer.write_detections(tmp_path / "frame_1.png", tmp_path)
+    assert out == tmp_path / "frame_1.json"
+    assert out.exists()
 
 
-def test_write_detections_empty_writes_no_file(analyzer, tmp_path):
+def test_write_detections_empty_sidecar_has_empty_detections_list(analyzer, tmp_path):
     analyzer.detections = []
-    analyzer.write_detections(tmp_path / "frame_1.png", tmp_path)
-    assert list(tmp_path.iterdir()) == []
+    out = analyzer.write_detections(tmp_path / "frame_1.png", tmp_path)
+    payload = json.loads(out.read_text())
+    assert payload == {"frame": "frame_1.png", "detections": []}
 
 
 def test_write_detections_non_empty_returns_path(analyzer, tmp_path):

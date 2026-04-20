@@ -71,6 +71,23 @@ def test_scan_counts_frames_with_detections(tmp_path: Path):
     assert r.frames_with_detections == 2
 
 
+def test_scan_empty_detections_sidecars_do_not_count(tmp_path: Path):
+    # After the resume refactor, detect writes a sidecar for every processed
+    # frame — clean frames get an empty `detections` list. Those must not
+    # inflate `frames_with_detections`.
+    for i in range(3):
+        _write_png(tmp_path, f"frame_{i:06d}")
+    _write_sidecar(tmp_path, "frame_000000", ["EMAIL_ADDRESS"])
+    _write_sidecar(tmp_path, "frame_000001", [])  # processed, clean
+    _write_sidecar(tmp_path, "frame_000002", [])  # processed, clean
+
+    r = FrameAnalyzerReport(tmp_path)
+    r.scan()
+    assert r.total_frames == 3
+    assert r.frames_with_detections == 1
+    assert r.detection_counts == {"EMAIL_ADDRESS": 1}
+
+
 def test_scan_tallies_detection_types(tmp_path: Path):
     _write_sidecar(tmp_path, "a", ["EMAIL_ADDRESS"])
     _write_sidecar(tmp_path, "b", ["EMAIL_ADDRESS", "PHONE_NUMBER"])

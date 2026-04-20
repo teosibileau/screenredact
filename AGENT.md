@@ -37,7 +37,7 @@ Each step is documented in full at `skills/<name>/SKILL.md` — read the skill b
 - **Naming conventions are load-bearing.** Downstream globs depend on `frame_NNNNNN.png`, `<stem>.json`, `<stem>_blurred.png`, `source.json`. Don't let users override the frames dir path or the `_blurred.png` suffix, even if they ask.
 - **Treat `source.json`'s `frame_rate` as the playback rate.** `extract-frames` stores `avg_frame_rate` there; `reassemble-video` passes it to ffmpeg as `-r`. Using ffprobe's `r_frame_rate` produces a video that plays 2–4× too fast for VFR sources.
 - **Originals are never modified.** Every step writes a new sibling or nothing. Undo = delete the derived file.
-- **Ctrl-C is safe everywhere.** Files are written atomically; re-running picks up where it left off.
+- **Ctrl-C is safe everywhere, and re-running resumes.** Files are written atomically. `detect` skips frames whose sidecar exists; `blur` skips frames whose `_blurred.png` exists; `extract-frames` skips when `source.json.frame_count` matches the PNGs on disk; `reassemble-video` skips when the output file exists unless `FORCE=1`.
 
 ## 🚨 Guardrails
 

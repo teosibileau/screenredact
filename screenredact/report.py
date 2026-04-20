@@ -42,7 +42,11 @@ class FrameAnalyzerReport:
             detections = payload.get("detections")
             if not isinstance(detections, list):
                 continue  # not a detection sidecar — skip
-            self.frames_with_detections += 1
+            # Empty `detections` means the frame was processed and came back
+            # clean (sidecar-exists is the resume marker since the detect step
+            # writes one per processed frame). Only count real hits.
+            if detections:
+                self.frames_with_detections += 1
             for det in detections:
                 if not isinstance(det, dict):
                     continue

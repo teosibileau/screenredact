@@ -63,10 +63,18 @@ The list is written into the frames directory (where it's gitignored by the exis
 
 ### 4. Reassemble with ffmpeg
 
+Resume check first — skip the mux when the output already exists, unless the user explicitly wants a rebuild:
+
+```bash
+if [ -f "<OUTPUT>" ] && [ -z "$FORCE" ]; then
+  echo "<OUTPUT> already exists; set FORCE=1 to rebuild" && exit 0
+fi
+```
+
 **No audio** (source.json's `"audio"` is `null`):
 
 ```bash
-ffmpeg -r "$FPS" -f concat -safe 0 -i "<FRAMES_DIR>/concat.txt" \
+ffmpeg -y -r "$FPS" -f concat -safe 0 -i "<FRAMES_DIR>/concat.txt" \
   -c:v libx264 -crf 18 -pix_fmt "$PIX_FMT" \
   "<OUTPUT>"
 ```
@@ -74,7 +82,7 @@ ffmpeg -r "$FPS" -f concat -safe 0 -i "<FRAMES_DIR>/concat.txt" \
 **With audio**:
 
 ```bash
-ffmpeg -r "$FPS" -f concat -safe 0 -i "<FRAMES_DIR>/concat.txt" \
+ffmpeg -y -r "$FPS" -f concat -safe 0 -i "<FRAMES_DIR>/concat.txt" \
   -i "<FRAMES_DIR>/$AUDIO_FILE" \
   -c:v libx264 -crf 18 -pix_fmt "$PIX_FMT" \
   -c:a copy -shortest \
