@@ -7,15 +7,6 @@ description: Run the screenredact detection pipeline over a directory of extract
 
 Scan a directory of video frames with OCR + PII detection (Apple Vision → Presidio) and write per-frame JSON sidecars for every frame that contains sensitive data.
 
-## Prerequisites
-
-The project's Python environment must be set up per `SETUP.md` — in particular:
-
-- `poetry install` has been run
-- `poetry run python -m spacy download en_core_web_lg` has been run at least once
-
-If either is missing, run them before proceeding. They are one-time setup steps.
-
 ## Inputs
 
 Ask the user for:
