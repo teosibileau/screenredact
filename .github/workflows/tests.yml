@@ -3,7 +3,13 @@ name: tests
 on:
   push:
     branches: [main]
+    paths:
+      - 'screenredact/**'
+      - 'tests/**'
   pull_request:
+    paths:
+      - 'screenredact/**'
+      - 'tests/**'
 
 jobs:
   pytest:
@@ -25,8 +31,9 @@ jobs:
           path: ~/.cache/pypoetry/virtualenvs
           key: venv-${{ runner.os }}-py3.13-${{ hashFiles('poetry.lock') }}
       - name: Install deps
-        # Skip the `runtime` group: paddlepaddle/paddleocr/presidio are stubbed
-        # by tests/conftest.py and not needed to lint or run pytest.
+        # Skip the `runtime` group: ocrmac/presidio are stubbed by
+        # tests/conftest.py and `ocrmac` is macOS-only anyway, so it
+        # can't resolve on the ubuntu-latest runner.
         run: poetry install --no-interaction --no-ansi --without runtime
       - name: Run tests
         run: poetry run pytest
