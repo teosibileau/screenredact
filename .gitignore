@@ -20,8 +20,8 @@ dist/
 .ruff_cache/
 .mypy_cache/
 
-# Project: hidden frame output dirs
-.*_frames/
+# Project: hidden pipeline run dir (per-video subdirs live inside)
+.screenredact/
 
 .claude
 .claude/*

@@ -4,29 +4,29 @@
 
 ## 🧩 Pipeline
 
-Four skills chain in sequence. Every skill consumes the previous one's artefacts from a single hidden directory (`./.<video-basename>_frames/`) and writes its own outputs back into the same place. All outputs are gitignored via the `.*_frames/` pattern.
+Four skills chain in sequence. Every skill consumes the previous one's artefacts from a single hidden per-video directory (`./.screenredact/<video-basename>/`) and writes its own outputs back into the same place. All outputs are gitignored via the `.screenredact/` pattern. The `.screenredact/` parent is shared across runs; each video gets its own subdirectory so repeated or concurrent runs don't collide.
 
 ```text
 video.mov
    │
    ▼  🎬 extract-frames
-.<video>_frames/
+.screenredact/<video>/
    ├─ frame_NNNNNN.png    (lossless, one per source frame)
    ├─ source.json         (framerate, pix_fmt, audio metadata, frame_count)
    └─ audio.<ext>         (only when the source has audio)
    │
    ▼  🔎 detect-frames
-.<video>_frames/
+.screenredact/<video>/
    ├─ <stem>.json         (one per frame with ≥1 PII hit; clean frames produce no file)
    └─ report.json         (aggregate rollup across all sidecars)
    │
    ▼  🫧 blur-frames
-.<video>_frames/
+.screenredact/<video>/
    └─ <stem>_blurred.png  (Gaussian-blurred copy sibling to the original)
    │
    ▼  🎞️ reassemble-video
-<video>_redacted.mp4      (in the CWD, alongside the source)
-   + concat.txt (kept in the frames dir for inspection)
+<video>_redacted.mp4      (written next to the original source video)
+   + concat.txt (kept in the per-video dir for inspection)
 ```
 
 Each step is documented in full at `skills/<name>/SKILL.md` — read the skill before invoking it.
@@ -34,7 +34,7 @@ Each step is documented in full at `skills/<name>/SKILL.md` — read the skill b
 ### 📏 Orchestration rules
 
 - **Never skip a step.** If a later skill is invoked before its predecessor ran, each skill stops and routes the user back.
-- **Naming conventions are load-bearing.** Downstream globs depend on `frame_NNNNNN.png`, `<stem>.json`, `<stem>_blurred.png`, `source.json`. Don't let users override the frames dir path or the `_blurred.png` suffix, even if they ask.
+- **Naming conventions are load-bearing.** Downstream globs depend on `frame_NNNNNN.png`, `<stem>.json`, `<stem>_blurred.png`, `source.json`. Don't let users override the per-video dir path (`.screenredact/<video-basename>/`) or the `_blurred.png` suffix, even if they ask.
 - **Treat `source.json`'s `frame_rate` as the playback rate.** `extract-frames` stores `avg_frame_rate` there; `reassemble-video` passes it to ffmpeg as `-r`. Using ffprobe's `r_frame_rate` produces a video that plays 2–4× too fast for VFR sources.
 - **Originals are never modified.** Every step writes a new sibling or nothing. Undo = delete the derived file.
 - **Ctrl-C is safe everywhere, and re-running resumes.** Files are written atomically. `detect` skips frames whose sidecar exists; `blur` skips frames whose `_blurred.png` exists; `extract-frames` skips when `source.json.frame_count` matches the PNGs on disk; `reassemble-video` skips when the output file exists unless `FORCE=1`.
@@ -43,7 +43,7 @@ Each step is documented in full at `skills/<name>/SKILL.md` — read the skill b
 
 - 🍎 **macOS only.** `ocrmac` wraps Apple Vision through pyobjc. Linux/Windows installs fail at dep resolution — intentional.
 - 🔒 **Don't re-encode frames.** The pipeline is lossless up to reassembly; the final mux is the only encode step.
-- ⚠️ **Don't delete the `.*_frames/` dir mid-pipeline without user confirmation.** It contains hours of OCR work even on a modest video.
+- ⚠️ **Don't delete the `.screenredact/<video>/` dir mid-pipeline without user confirmation.** It contains hours of OCR work even on a modest video. Deleting the `.screenredact/` parent wipes *every* video's run state, so confirm even more carefully before touching it.
 - 📜 **`source.json` is the contract.** If its shape changes, `reassemble-video` breaks silently. Fields the pipeline relies on: `frame_rate`, `pix_fmt`, `frame_count`, `audio` (object or `null`).
 
 ## 🧰 Environment setup

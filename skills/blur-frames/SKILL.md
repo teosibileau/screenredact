@@ -15,7 +15,7 @@ Consume the detection sidecars written by `detect-frames` and blur the PII bbox 
 
 Ask the user for:
 
-1. **Frames directory** (required) — the same `./.<video-basename>_frames/` that `detect-frames` wrote sidecars into.
+1. **Frames directory** (required) — the same `./.screenredact/<video-basename>/` that `detect-frames` wrote sidecars into.
 
 Blurred outputs are always written back into the same frames directory with a `_blurred.png` suffix on the stem (e.g. `frame_000501.png` → `frame_000501_blurred.png`). This is fixed — do not accept an override, even if the user asks. Keeping frames and their blurred counterparts co-located is what lets the future reassembly step pick the redacted variant with a simple glob.
 
@@ -71,4 +71,4 @@ If the user wants to rewind, deleting every `<FRAMES_DIR>/*_blurred.png` restore
 - **Gaussian blur is not cryptographically irreversible.** It is the standard visual redaction in screen recordings and is more than sufficient for "don't accidentally dox yourself on YouTube". If the user has high-sensitivity data (e.g. credentials that must resist recovery attacks), flag that this skill is the wrong tool and we should swap the default to solid-fill or pixelation before shipping.
 - **Over-coverage is deliberate.** The AABB of the OCR polygon plus 4px padding errs toward blurring a slightly larger region than strictly required. This is the safe bias for a redaction tool.
 - **Ctrl-C is safe mid-run, and re-running resumes.** Each frame is written atomically via `cv2.imwrite`. On re-run, frames whose `_blurred.png` already exists are skipped — the blur pass is not redone. If you want to re-blur a frame (e.g. after editing its sidecar), delete the existing `_blurred.png` first. Originals are never read as candidates (the `_blurred.png` suffix is excluded from the input glob).
-- **Outputs are gitignored.** The existing `.*_frames/` pattern in `.gitignore` catches `_blurred.png` files automatically — they live in the same hidden frames directory as everything else.
+- **Outputs are gitignored.** The existing `.screenredact/` pattern in `.gitignore` catches `_blurred.png` files automatically — they live in the same per-video hidden directory as everything else.
