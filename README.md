@@ -29,8 +29,8 @@ The pipeline is designed to be driven by an agent (Claude Code): open the repo, 
 To drive it manually, see the individual `SKILL.md` files under `skills/`. The two Python steps are one-liners:
 
 ```sh
-poetry run screenredact detect ./.<video-basename>_frames/
-poetry run screenredact blur   ./.<video-basename>_frames/
+poetry run screenredact detect ./.screenredact/<video-basename>/
+poetry run screenredact blur   ./.screenredact/<video-basename>/
 ```
 
 The `extract-frames` and `reassemble-video` skills are thin wrappers around `ffmpeg`; their SKILL.md files contain copy-paste commands.

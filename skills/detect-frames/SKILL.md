@@ -11,7 +11,7 @@ Scan a directory of video frames with OCR + PII detection (Apple Vision → Pres
 
 Ask the user for:
 
-1. **Frames directory** (required) — conventionally `./.<video-basename>_frames/` produced by the `extract-frames` skill. If the user hasn't run `extract-frames` first, stop and tell them to do that.
+1. **Frames directory** (required) — conventionally `./.screenredact/<video-basename>/` produced by the `extract-frames` skill. If the user hasn't run `extract-frames` first, stop and tell them to do that.
 
 Sidecars are always written back into the same frames directory. This is fixed — do not accept an override from the user, even if they ask. Downstream redaction tooling relies on the convention that a frame and its detection sidecar live side by side.
 
@@ -112,4 +112,4 @@ Surface the coverage ratio (`frames_with_detections / total_frames`) and the top
 - **First-frame startup is Presidio, not OCR.** Apple Vision loads instantly via the framework bridge; the ~5 s first-frame pause is Presidio + spaCy's `en_core_web_lg` model loading into memory. Subsequent frames reuse the cached analyzer.
 - **Presidio warnings at startup are noise.** It logs `Recognizer not added to registry` for Spanish/Italian/Polish recognizers when the language is `en`. Harmless. Do not treat it as an error.
 - **Ctrl-C is safe mid-run.** Already-written sidecars are preserved. Detection is idempotent per frame — re-running will re-OCR unchanged frames but overwrite sidecars with identical content.
-- **Sidecars are gitignored.** The `.*_frames/` pattern in `.gitignore` catches the whole hidden frames directory, including the JSON files inside.
+- **Sidecars are gitignored.** The `.screenredact/` pattern in `.gitignore` catches the whole hidden parent, including every per-video subdirectory and the JSON files inside.

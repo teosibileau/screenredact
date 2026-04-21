@@ -16,8 +16,8 @@ Recompose a redacted video from the frames directory. For each source frame, the
 
 Ask the user for:
 
-1. **Frames directory** (required) — the `./.<video-basename>_frames/` that `extract-frames` wrote to.
-2. **Output path** (optional) — defaults to `./<video-basename>_redacted.mp4` in the current directory. Accept an override here; this is the user-facing deliverable, not an internal artefact.
+1. **Frames directory** (required) — the `./.screenredact/<video-basename>/` that `extract-frames` wrote to.
+2. **Output path** (optional) — defaults to `<video-basename>_redacted.mp4` **in the same directory as the original source video** (read `input` from `source.json` and take its parent). Do *not* default to the current working directory — the agent may be invoked from anywhere. Accept an override here; this is the user-facing deliverable, not an internal artefact.
 
 ## Procedure
 
@@ -59,7 +59,7 @@ cd "<FRAMES_DIR>"
 } > concat.txt
 ```
 
-The list is written into the frames directory (where it's gitignored by the existing `.*_frames/` rule). Treat it as a debugging artefact — if the output video has frame-ordering issues, this file is the first place to look.
+The list is written into the per-video frames directory (where it's gitignored by the existing `.screenredact/` rule). Treat it as a debugging artefact — if the output video has frame-ordering issues, this file is the first place to look.
 
 ### 4. Reassemble with ffmpeg
 
@@ -116,7 +116,7 @@ If counts or durations diverge meaningfully, dig in before calling it done — m
 
 ## Notes
 
-- **The concat list lives in the frames directory on purpose.** It's cheap to regenerate, it's gitignored along with everything else in `.*_frames/`, and keeping it makes the reassembly step reviewable after the fact.
+- **The concat list lives in the per-video frames directory on purpose.** It's cheap to regenerate, it's gitignored along with everything else in `.screenredact/`, and keeping it makes the reassembly step reviewable after the fact.
 - **Re-running is safe.** `concat.txt` is overwritten; ffmpeg will prompt before overwriting `<OUTPUT>` unless `-y` is added. Add `-y` only when driving the skill unattended.
 - **The output is a re-encoded derivative, not a container-level round-trip of the source.** libx264 + CRF 18 is the default because it's widely playable and near-lossless. If the user needs the original codec or container preserved, that's a different task — surface it rather than silently switching encoders.
 - **CFR only.** `extract-frames` writes exactly one PNG per source frame, but PNGs carry no timing — so the reassembly is inherently constant-framerate at the source's average rate. For true VFR sources (rare for screen recordings), tiny per-frame timing drift is unavoidable with this pipeline.

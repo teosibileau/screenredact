@@ -13,7 +13,7 @@ Ask the user for:
 
 1. **Input video path** (required)
 
-The output directory is always `./.<video-basename>_frames/` (hidden, leading dot, relative to the current working directory). This is fixed — do not accept an override from the user, even if they ask. Downstream tooling relies on this convention.
+The output directory is always `./.screenredact/<video-basename>/` (hidden `.screenredact/` parent at the CWD root, then a per-video subdirectory named after the input file's stem — e.g. `demo.mov` → `./.screenredact/demo/`). This is fixed — do not accept an override from the user, even if they ask. The parent is shared across videos so repeated runs land side by side; the per-video subdirectory isolates each run's frames, sidecars, and audio. Downstream tooling relies on this convention.
 
 ## Procedure
 
